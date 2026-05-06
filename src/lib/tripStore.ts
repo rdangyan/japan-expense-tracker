@@ -32,6 +32,14 @@ export function getEntriesForTrip(tripId: string): Promise<TripEntry[]> {
   })
 }
 
+export function saveTripEntry(entry: TripEntry): Promise<void> {
+  return withStores('readwrite', [tripStoreName, entriesStoreName], (stores) => {
+    const request = stores.entries.put(entry)
+
+    return requestToPromise<IDBValidKey>(request).then(() => undefined)
+  })
+}
+
 export function saveTripSnapshot(trip: TripSettings, entries: TripEntry[]): Promise<void> {
   return withStores('readwrite', [tripStoreName, entriesStoreName], (stores) => {
     const writes: Promise<unknown>[] = [

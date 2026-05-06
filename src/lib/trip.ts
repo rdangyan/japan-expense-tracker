@@ -71,6 +71,21 @@ export type CashWithdrawalEntry = BaseTripEntry & {
 
 export type TripEntry = ExpenseEntry | CashWithdrawalEntry
 
+export type ExpenseInput = {
+  amountJpy: string
+  category: string
+  date: string
+  paymentMethod: string
+  note: string
+}
+
+export type ExpenseValidationErrors = Partial<Record<keyof ExpenseInput, string>>
+
+export type ExpenseValidationResult = {
+  isValid: boolean
+  errors: ExpenseValidationErrors
+}
+
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/
 const currencyPattern = /^[A-Z]{3}$/
 
@@ -127,7 +142,7 @@ export function createTripSettings(input: TripSetupInput, now = new Date()): Tri
 
   return {
     key: ACTIVE_TRIP_KEY,
-    tripId: createStableId(),
+    tripId: createStableId('trip'),
     tripName: input.tripName.trim(),
     startDate: input.startDate,
     endDate: input.endDate,
@@ -137,6 +152,77 @@ export function createTripSettings(input: TripSetupInput, now = new Date()): Tri
     createdAt: timestamp,
     updatedAt: timestamp,
   }
+}
+
+export function validateExpenseInput(input: ExpenseInput): ExpenseValidationResult {
+  const errors: ExpenseValidationErrors = {}
+  const amountJpy = Number(input.amountJpy)
+  const note = input.note.trim()
+
+  if (!Number.isInteger(amountJpy) || amountJpy <= 0) {
+    errors.amountJpy = 'Enter a whole-yen amount greater than 0.'
+  }
+
+  if (!isKnownExpenseCategory(input.category)) {
+    errors.category = 'Choose a category.'
+  }
+
+  if (!isValidIsoDate(input.date)) {
+    errors.date = 'Choose a valid date.'
+  }
+
+  if (input.paymentMethod && !isKnownPaymentMethod(input.paymentMethod)) {
+    errors.paymentMethod = 'Choose a payment method.'
+  }
+
+  if (note.length > 80) {
+    errors.note = 'Keep the note to 80 characters or fewer.'
+  }
+
+  if (/[\r\n]/.test(input.note)) {
+    errors.note = 'Keep the note to one line.'
+  }
+
+  return {
+    isValid: Object.keys(errors).length === 0,
+    errors,
+  }
+}
+
+export function createExpenseEntry(
+  tripId: string,
+  input: ExpenseInput,
+  now = new Date(),
+): ExpenseEntry {
+  const timestamp = now.toISOString()
+  const entry: ExpenseEntry = {
+    id: createStableId('expense'),
+    tripId,
+    type: 'expense',
+    date: input.date,
+    amountJpy: Number(input.amountJpy),
+    category: input.category as ExpenseCategory,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }
+  const note = input.note.trim()
+
+  if (input.paymentMethod) {
+    entry.paymentMethod = input.paymentMethod as PaymentMethod
+  }
+
+  if (note) {
+    entry.note = note
+  }
+
+  return entry
+}
+
+export function calculateExpenseTotalJpy(entries: TripEntry[]): number {
+  return entries.reduce(
+    (total, entry) => (entry.type === 'expense' ? total + entry.amountJpy : total),
+    0,
+  )
 }
 
 export function convertHomeToJpy(amountHome: number, exchangeRateJpy: number): number {
@@ -172,10 +258,18 @@ function roundCurrency(amount: number): number {
   return Math.round((amount + Number.EPSILON) * 100) / 100
 }
 
-function createStableId(): string {
+function isKnownExpenseCategory(category: string): category is ExpenseCategory {
+  return expenseCategories.includes(category as ExpenseCategory)
+}
+
+function isKnownPaymentMethod(method: string): method is PaymentMethod {
+  return paymentMethods.includes(method as PaymentMethod)
+}
+
+function createStableId(prefix: string): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID()
   }
 
-  return `trip-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }

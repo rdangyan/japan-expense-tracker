@@ -3,19 +3,34 @@ import type { FormEvent, ReactElement } from 'react'
 import './App.css'
 import {
   convertHomeToJpy,
+  convertJpyToHome,
+  createExpenseEntry,
   createTripSettings,
   currencyPresets,
+  expenseCategories,
   formatHomeCurrency,
   formatJpy,
+  paymentMethods,
+  validateExpenseInput,
   validateTripSetup,
+  calculateExpenseTotalJpy,
+  type ExpenseInput,
+  type ExpenseValidationErrors,
   type ExpenseEntry,
+  type PaymentMethod,
   type TripEntry,
   type TripSettings,
   type TripSetupInput,
   type TripValidationErrors,
 } from './lib/trip'
 import { createDemoTrip } from './lib/demoTrip'
-import { getActiveTrip, getEntriesForTrip, saveActiveTrip, saveTripSnapshot } from './lib/tripStore'
+import {
+  getActiveTrip,
+  getEntriesForTrip,
+  saveActiveTrip,
+  saveTripEntry,
+  saveTripSnapshot,
+} from './lib/tripStore'
 
 type TabId = 'dashboard' | 'expenses' | 'settings'
 
@@ -56,10 +71,12 @@ function App() {
   const [activeTab, setActiveTab] = useState<TabId>('dashboard')
   const [trip, setTrip] = useState<TripSettings | null>(null)
   const [entries, setEntries] = useState<TripEntry[]>([])
+  const [isExpenseSheetOpen, setIsExpenseSheetOpen] = useState(false)
   const [isLoadingTrip, setIsLoadingTrip] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const currentTab = tabs.find((tab) => tab.id === activeTab) ?? tabs[0]
   const emptyState = emptyStates[activeTab]
+  const hasEntries = entries.length > 0
 
   useEffect(() => {
     let isMounted = true
@@ -122,6 +139,8 @@ function App() {
   }
 
   const budgetJpy = convertHomeToJpy(trip.totalBudgetHome, trip.exchangeRateJpy)
+  const totalSpentJpy = calculateExpenseTotalJpy(entries)
+  const remainingJpy = budgetJpy - totalSpentJpy
 
   return (
     <div className="app-shell">
@@ -141,7 +160,7 @@ function App() {
             className="icon-button"
             type="button"
             aria-label="Open add expense form"
-            disabled
+            onClick={() => setIsExpenseSheetOpen(true)}
           >
             <PlusIcon />
           </button>
@@ -163,6 +182,20 @@ function App() {
             <h1 id="overview-title">{formatHomeCurrency(trip.totalBudgetHome, trip.homeCurrency)}</h1>
           </div>
           <dl className="trip-summary" aria-label="Trip budget summary">
+            <div>
+              <dt>Spent</dt>
+              <dd>
+                {formatJpy(totalSpentJpy)}
+                <span>{formatHomeCurrency(convertJpyToHome(totalSpentJpy, trip.exchangeRateJpy), trip.homeCurrency)}</span>
+              </dd>
+            </div>
+            <div>
+              <dt>Remaining</dt>
+              <dd>
+                {formatJpy(remainingJpy)}
+                <span>{formatHomeCurrency(convertJpyToHome(remainingJpy, trip.exchangeRateJpy), trip.homeCurrency)}</span>
+              </dd>
+            </div>
             <div>
               <dt>JPY equivalent</dt>
               <dd>{formatJpy(budgetJpy)}</dd>
@@ -197,7 +230,7 @@ function App() {
                 className="primary-action"
                 type="button"
                 aria-label="Open add expense form"
-                disabled
+                onClick={() => setIsExpenseSheetOpen(true)}
               >
                 <PlusIcon />
                 <span>Add</span>
@@ -210,8 +243,18 @@ function App() {
               <TabIcon icon={currentTab.icon} />
             </div>
             <p className="empty-eyebrow">{emptyState.eyebrow}</p>
-            <h3>{emptyState.title}</h3>
-            <p>{emptyState.body}</p>
+            <h3>
+              {activeTab !== 'settings' && hasEntries
+                ? activeTab === 'dashboard'
+                  ? 'Spending totals are up to date.'
+                  : 'Your saved entries are ready.'
+                : emptyState.title}
+            </h3>
+            <p>
+              {activeTab !== 'settings' && hasEntries
+                ? 'New expenses persist locally and update these JPY-first totals immediately.'
+                : emptyState.body}
+            </p>
             {activeTab === 'settings' && (
               <dl className="settings-summary" aria-label="Persisted trip settings">
                 <div>
@@ -230,12 +273,19 @@ function App() {
                 </div>
               </dl>
             )}
-            {activeTab !== 'settings' && entries.length > 0 && (
+            {activeTab !== 'settings' && hasEntries && (
               <PopulatedEntryPreview entries={entries} trip={trip} view={activeTab} />
             )}
-            <button className="secondary-action" type="button" disabled>
-              {emptyState.action}
-            </button>
+            {activeTab !== 'settings' && !hasEntries && (
+              <button className="secondary-action" type="button" onClick={() => setIsExpenseSheetOpen(true)}>
+                Add expense
+              </button>
+            )}
+            {activeTab === 'settings' && (
+              <button className="secondary-action" type="button" disabled>
+                {emptyState.action}
+              </button>
+            )}
           </div>
         </section>
       </main>
@@ -260,6 +310,16 @@ function App() {
           )
         })}
       </nav>
+
+      <ExpenseBottomSheet
+        isOpen={isExpenseSheetOpen}
+        trip={trip}
+        onClose={() => setIsExpenseSheetOpen(false)}
+        onSaved={(entry) => {
+          setEntries((current) => [...current, entry].sort(compareEntriesByDateThenCreated))
+          setIsExpenseSheetOpen(false)
+        }}
+      />
     </div>
   )
 }
@@ -521,6 +581,213 @@ function TripSetupScreen({ loadError, onTripCreated }: TripSetupScreenProps) {
   )
 }
 
+type ExpenseBottomSheetProps = {
+  isOpen: boolean
+  trip: TripSettings
+  onClose: () => void
+  onSaved: (entry: ExpenseEntry) => void
+}
+
+const blankExpenseForm: ExpenseInput = {
+  amountJpy: '',
+  category: '',
+  date: '',
+  paymentMethod: '',
+  note: '',
+}
+
+const paymentMethodLabels: Record<PaymentMethod, string> = {
+  cash: 'Cash',
+  card: 'Card',
+  icCard: 'IC card',
+  other: 'Other',
+}
+
+function ExpenseBottomSheet({ isOpen, trip, onClose, onSaved }: ExpenseBottomSheetProps) {
+  const [form, setForm] = useState<ExpenseInput>(() => ({
+    ...blankExpenseForm,
+    date: trip.startDate,
+  }))
+  const [touched, setTouched] = useState<Partial<Record<keyof ExpenseInput, boolean>>>({})
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const validation = useMemo(() => validateExpenseInput(form), [form])
+  const visibleErrors = getVisibleExpenseErrors(validation.errors, touched)
+  const convertedAmount =
+    Number(form.amountJpy) > 0
+      ? formatHomeCurrency(convertJpyToHome(Number(form.amountJpy), trip.exchangeRateJpy), trip.homeCurrency)
+      : formatHomeCurrency(0, trip.homeCurrency)
+
+  useEffect(() => {
+    if (isOpen) {
+      setForm({ ...blankExpenseForm, date: trip.startDate })
+      setTouched({})
+      setSubmitError(null)
+    }
+  }, [isOpen, trip.startDate])
+
+  if (!isOpen) {
+    return null
+  }
+
+  function updateField(name: keyof ExpenseInput, value: string) {
+    setForm((current) => ({
+      ...current,
+      [name]: name === 'note' ? value.replace(/[\r\n]/g, ' ').slice(0, 80) : value,
+    }))
+  }
+
+  function markTouched(name: keyof ExpenseInput) {
+    setTouched((current) => ({ ...current, [name]: true }))
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setTouched({
+      amountJpy: true,
+      category: true,
+      date: true,
+      paymentMethod: true,
+      note: true,
+    })
+
+    if (!validation.isValid) {
+      return
+    }
+
+    const entry = createExpenseEntry(trip.tripId, form)
+    setIsSaving(true)
+    setSubmitError(null)
+
+    saveTripEntry(entry)
+      .then(() => onSaved(entry))
+      .catch(() => setSubmitError('Expense could not be saved in this browser.'))
+      .finally(() => setIsSaving(false))
+  }
+
+  return (
+    <div className="sheet-layer" role="presentation">
+      <button className="sheet-backdrop" type="button" aria-label="Close add expense form" onClick={onClose} />
+      <section
+        className="bottom-sheet"
+        aria-labelledby="expense-sheet-title"
+        aria-modal="true"
+        role="dialog"
+      >
+        <div className="sheet-handle" aria-hidden="true" />
+        <div className="sheet-header">
+          <div>
+            <p className="section-kicker">Add entry</p>
+            <h2 id="expense-sheet-title">New expense</h2>
+          </div>
+          <button className="icon-button" type="button" aria-label="Close add expense form" onClick={onClose}>
+            <CloseIcon />
+          </button>
+        </div>
+
+        <div className="entry-type-control" aria-label="Entry type">
+          <button type="button" data-active="true">
+            Expense
+          </button>
+          <button type="button" disabled>
+            Cash withdrawal
+          </button>
+        </div>
+
+        <form className="expense-form" onSubmit={handleSubmit} noValidate>
+          {submitError && (
+            <p className="form-error" role="alert">
+              {submitError}
+            </p>
+          )}
+
+          <ExpenseField error={visibleErrors.amountJpy} label="Amount (JPY)" name="amountJpy">
+            <input
+              id="amountJpy"
+              name="amountJpy"
+              type="number"
+              min="1"
+              step="1"
+              inputMode="numeric"
+              value={form.amountJpy}
+              onBlur={() => markTouched('amountJpy')}
+              onChange={(event) => updateField('amountJpy', event.target.value)}
+            />
+          </ExpenseField>
+
+          <ExpenseField error={visibleErrors.category} label="Category" name="category">
+            <select
+              id="category"
+              name="category"
+              value={form.category}
+              onBlur={() => markTouched('category')}
+              onChange={(event) => updateField('category', event.target.value)}
+            >
+              <option value="">Choose category</option>
+              {expenseCategories.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
+          </ExpenseField>
+
+          <div className="form-grid">
+            <ExpenseField error={visibleErrors.date} label="Date" name="date">
+              <input
+                id="date"
+                name="date"
+                type="date"
+                value={form.date}
+                onBlur={() => markTouched('date')}
+                onChange={(event) => updateField('date', event.target.value)}
+              />
+            </ExpenseField>
+
+            <ExpenseField error={visibleErrors.paymentMethod} label="Payment method" name="paymentMethod">
+              <select
+                id="paymentMethod"
+                name="paymentMethod"
+                value={form.paymentMethod}
+                onBlur={() => markTouched('paymentMethod')}
+                onChange={(event) => updateField('paymentMethod', event.target.value)}
+              >
+                <option value="">Blank</option>
+                {paymentMethods.map((method) => (
+                  <option key={method} value={method}>
+                    {paymentMethodLabels[method]}
+                  </option>
+                ))}
+              </select>
+            </ExpenseField>
+          </div>
+
+          <ExpenseField error={visibleErrors.note} label="Note" name="note">
+            <input
+              id="note"
+              name="note"
+              type="text"
+              maxLength={80}
+              value={form.note}
+              onBlur={() => markTouched('note')}
+              onChange={(event) => updateField('note', event.target.value)}
+            />
+          </ExpenseField>
+
+          <div className="budget-preview" aria-live="polite">
+            <span>Home-currency preview</span>
+            <strong>{convertedAmount}</strong>
+          </div>
+
+          <button className="setup-submit" type="submit" disabled={!validation.isValid || isSaving}>
+            {isSaving ? 'Saving expense...' : 'Save expense'}
+          </button>
+        </form>
+      </section>
+    </div>
+  )
+}
+
 type PopulatedEntryPreviewProps = {
   entries: TripEntry[]
   trip: TripSettings
@@ -568,7 +835,9 @@ function PopulatedEntryPreview({ entries, trip, view }: PopulatedEntryPreviewPro
             <span className="entry-badge" data-entry-type={entry.type}>
               {entry.type === 'expense' ? entry.category : 'Cash withdrawal'}
             </span>
-            <span className="entry-note">{entry.note}</span>
+            <span className="entry-note">
+              {entry.note || (entry.type === 'expense' ? `${entry.category} expense` : 'Cash withdrawal')}
+            </span>
             <span className="entry-meta">
               {formatDate(entry.date)} &middot; {formatJpy(entry.amountJpy)}
             </span>
@@ -600,6 +869,27 @@ function Field({ children, error, label, name }: FieldProps) {
   )
 }
 
+type ExpenseFieldProps = {
+  children: ReactElement
+  error?: string
+  label: string
+  name: keyof ExpenseInput
+}
+
+function ExpenseField({ children, error, label, name }: ExpenseFieldProps) {
+  return (
+    <label className="field" htmlFor={name}>
+      <span>{label}</span>
+      {children}
+      {error && (
+        <span className="field-error" id={`${name}-error`}>
+          {error}
+        </span>
+      )}
+    </label>
+  )
+}
+
 function getVisibleErrors(
   errors: TripValidationErrors,
   touched: Partial<Record<keyof TripSetupInput, boolean>>,
@@ -607,6 +897,19 @@ function getVisibleErrors(
   return Object.fromEntries(
     Object.entries(errors).filter(([field]) => touched[field as keyof TripSetupInput]),
   ) as TripValidationErrors
+}
+
+function getVisibleExpenseErrors(
+  errors: ExpenseValidationErrors,
+  touched: Partial<Record<keyof ExpenseInput, boolean>>,
+): ExpenseValidationErrors {
+  return Object.fromEntries(
+    Object.entries(errors).filter(([field]) => touched[field as keyof ExpenseInput]),
+  ) as ExpenseValidationErrors
+}
+
+function compareEntriesByDateThenCreated(first: TripEntry, second: TripEntry): number {
+  return first.date.localeCompare(second.date) || first.createdAt.localeCompare(second.createdAt)
 }
 
 function formatDate(value: string): string {
@@ -645,6 +948,15 @@ function PlusIcon() {
     <svg viewBox="0 0 24 24" role="presentation" aria-hidden="true">
       <path d="M12 5v14" />
       <path d="M5 12h14" />
+    </svg>
+  )
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" role="presentation" aria-hidden="true">
+      <path d="m6 6 12 12" />
+      <path d="m18 6-12 12" />
     </svg>
   )
 }
