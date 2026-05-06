@@ -1,5 +1,18 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { FormEvent, ReactElement } from 'react'
 import './App.css'
+import {
+  convertHomeToJpy,
+  createTripSettings,
+  currencyPresets,
+  formatHomeCurrency,
+  formatJpy,
+  validateTripSetup,
+  type TripSettings,
+  type TripSetupInput,
+  type TripValidationErrors,
+} from './lib/trip'
+import { getActiveTrip, saveActiveTrip } from './lib/tripStore'
 
 type TabId = 'dashboard' | 'expenses' | 'settings'
 
@@ -30,16 +43,62 @@ const emptyStates = {
   },
   settings: {
     eyebrow: 'Trip settings',
-    title: 'Trip details have not been configured.',
-    body: 'A future setup step will store trip dates, home currency, budget, and exchange rate locally for offline use.',
-    action: 'Setup coming soon',
+    title: 'Trip details are stored locally.',
+    body: 'This read-only view shows the first-run setup details. Editing arrives in a later issue.',
+    action: 'Settings editing coming soon',
   },
 } satisfies Record<TabId, { eyebrow: string; title: string; body: string; action: string }>
 
 function App() {
   const [activeTab, setActiveTab] = useState<TabId>('dashboard')
+  const [trip, setTrip] = useState<TripSettings | null>(null)
+  const [isLoadingTrip, setIsLoadingTrip] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const currentTab = tabs.find((tab) => tab.id === activeTab) ?? tabs[0]
   const emptyState = emptyStates[activeTab]
+
+  useEffect(() => {
+    let isMounted = true
+
+    getActiveTrip()
+      .then((activeTrip) => {
+        if (isMounted) {
+          setTrip(activeTrip)
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setLoadError('Trip data could not be loaded from this browser.')
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsLoadingTrip(false)
+        }
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  if (isLoadingTrip) {
+    return (
+      <main className="setup-page" aria-busy="true">
+        <div className="setup-card">
+          <p className="section-kicker">Japan Expense Tracker</p>
+          <h1>Loading trip.</h1>
+          <p className="setup-intro">Checking this browser for your active Japan trip.</p>
+        </div>
+      </main>
+    )
+  }
+
+  if (!trip) {
+    return <TripSetupScreen loadError={loadError} onTripCreated={setTrip} />
+  }
+
+  const budgetJpy = convertHomeToJpy(trip.totalBudgetHome, trip.exchangeRateJpy)
 
   return (
     <div className="app-shell">
@@ -77,12 +136,27 @@ function App() {
       <main className="content" id="main-content">
         <section className="overview-panel" aria-labelledby="overview-title">
           <div>
-            <p className="section-kicker">Japan Spring Trip</p>
-            <h1 id="overview-title">TBD.</h1>
+            <p className="section-kicker">{trip.tripName}</p>
+            <h1 id="overview-title">{formatHomeCurrency(trip.totalBudgetHome, trip.homeCurrency)}</h1>
           </div>
-          <p>
-            TBD
-          </p>
+          <dl className="trip-summary" aria-label="Trip budget summary">
+            <div>
+              <dt>JPY equivalent</dt>
+              <dd>{formatJpy(budgetJpy)}</dd>
+            </div>
+            <div>
+              <dt>Trip dates</dt>
+              <dd>
+                {formatDate(trip.startDate)} to {formatDate(trip.endDate)}
+              </dd>
+            </div>
+            <div>
+              <dt>Exchange rate</dt>
+              <dd>
+                1 {trip.homeCurrency} = {formatJpy(trip.exchangeRateJpy)}
+              </dd>
+            </div>
+          </dl>
         </section>
 
         <section
@@ -115,6 +189,24 @@ function App() {
             <p className="empty-eyebrow">{emptyState.eyebrow}</p>
             <h3>{emptyState.title}</h3>
             <p>{emptyState.body}</p>
+            {activeTab === 'settings' && (
+              <dl className="settings-summary" aria-label="Persisted trip settings">
+                <div>
+                  <dt>Trip</dt>
+                  <dd>{trip.tripName}</dd>
+                </div>
+                <div>
+                  <dt>Budget</dt>
+                  <dd>{formatHomeCurrency(trip.totalBudgetHome, trip.homeCurrency)}</dd>
+                </div>
+                <div>
+                  <dt>Rate</dt>
+                  <dd>
+                    1 {trip.homeCurrency} = {formatJpy(trip.exchangeRateJpy)}
+                  </dd>
+                </div>
+              </dl>
+            )}
             <button className="secondary-action" type="button" disabled>
               {emptyState.action}
             </button>
@@ -144,6 +236,265 @@ function App() {
       </nav>
     </div>
   )
+}
+
+type TripSetupScreenProps = {
+  loadError: string | null
+  onTripCreated: (trip: TripSettings) => void
+}
+
+const initialTripSetup: TripSetupInput = {
+  tripName: '',
+  startDate: '',
+  endDate: '',
+  homeCurrency: 'CAD',
+  totalBudgetHome: '',
+  exchangeRateJpy: '',
+}
+
+function TripSetupScreen({ loadError, onTripCreated }: TripSetupScreenProps) {
+  const [form, setForm] = useState<TripSetupInput>(initialTripSetup)
+  const [touched, setTouched] = useState<Partial<Record<keyof TripSetupInput, boolean>>>({})
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const validation = useMemo(() => validateTripSetup(form), [form])
+  const visibleErrors = getVisibleErrors(validation.errors, touched)
+  const customCurrency = !currencyPresets.includes(form.homeCurrency as (typeof currencyPresets)[number])
+  const budgetPreview =
+    Number(form.totalBudgetHome) > 0 && Number(form.exchangeRateJpy) > 0
+      ? formatJpy(convertHomeToJpy(Number(form.totalBudgetHome), Number(form.exchangeRateJpy)))
+      : 'JPY 0'
+
+  function updateField(name: keyof TripSetupInput, value: string) {
+    setForm((current) => ({
+      ...current,
+      [name]: name === 'homeCurrency' ? value.toUpperCase().slice(0, 3) : value,
+    }))
+  }
+
+  function markTouched(name: keyof TripSetupInput) {
+    setTouched((current) => ({ ...current, [name]: true }))
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setTouched({
+      tripName: true,
+      startDate: true,
+      endDate: true,
+      homeCurrency: true,
+      totalBudgetHome: true,
+      exchangeRateJpy: true,
+    })
+
+    if (!validation.isValid) {
+      return
+    }
+
+    const nextTrip = createTripSettings(form)
+    setIsSaving(true)
+    setSubmitError(null)
+
+    saveActiveTrip(nextTrip)
+      .then(() => onTripCreated(nextTrip))
+      .catch(() => {
+        setSubmitError('Trip setup could not be saved in this browser.')
+      })
+      .finally(() => setIsSaving(false))
+  }
+
+  return (
+    <main className="setup-page">
+      <section className="setup-card" aria-labelledby="setup-title">
+        <div className="setup-copy">
+          <p className="section-kicker">First run setup</p>
+          <h1 id="setup-title">Set up your Japan trip.</h1>
+          <p className="setup-intro">
+            Create one active local trip before entering the app shell. Your budget is saved in this
+            browser for offline-first tracking.
+          </p>
+        </div>
+
+        <form className="setup-form" onSubmit={handleSubmit} noValidate>
+          {(loadError || submitError) && (
+            <p className="form-error" role="alert">
+              {submitError ?? loadError}
+            </p>
+          )}
+
+          <Field
+            error={visibleErrors.tripName}
+            label="Trip name"
+            name="tripName"
+          >
+            <input
+              id="tripName"
+              name="tripName"
+              type="text"
+              maxLength={60}
+              value={form.tripName}
+              onBlur={() => markTouched('tripName')}
+              onChange={(event) => updateField('tripName', event.target.value)}
+            />
+          </Field>
+
+          <div className="form-grid">
+            <Field error={visibleErrors.startDate} label="Start date" name="startDate">
+              <input
+                id="startDate"
+                name="startDate"
+                type="date"
+                value={form.startDate}
+                onBlur={() => markTouched('startDate')}
+                onChange={(event) => updateField('startDate', event.target.value)}
+              />
+            </Field>
+
+            <Field error={visibleErrors.endDate} label="End date" name="endDate">
+              <input
+                id="endDate"
+                name="endDate"
+                type="date"
+                value={form.endDate}
+                onBlur={() => markTouched('endDate')}
+                onChange={(event) => updateField('endDate', event.target.value)}
+              />
+            </Field>
+          </div>
+
+          <fieldset className="currency-fieldset">
+            <legend>Home currency</legend>
+            <div className="currency-options">
+              {currencyPresets.map((currency) => (
+                <button
+                  key={currency}
+                  type="button"
+                  className="currency-chip"
+                  data-active={form.homeCurrency === currency}
+                  onClick={() => {
+                    updateField('homeCurrency', currency)
+                    markTouched('homeCurrency')
+                  }}
+                >
+                  {currency}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="currency-chip"
+                data-active={customCurrency}
+                onClick={() => updateField('homeCurrency', '')}
+              >
+                Custom
+              </button>
+            </div>
+            <input
+              id="homeCurrency"
+              name="homeCurrency"
+              type="text"
+              inputMode="text"
+              maxLength={3}
+              aria-describedby={visibleErrors.homeCurrency ? 'homeCurrency-error' : undefined}
+              value={form.homeCurrency}
+              onBlur={() => markTouched('homeCurrency')}
+              onChange={(event) => updateField('homeCurrency', event.target.value)}
+            />
+            {visibleErrors.homeCurrency && (
+              <p className="field-error" id="homeCurrency-error">
+                {visibleErrors.homeCurrency}
+              </p>
+            )}
+          </fieldset>
+
+          <div className="form-grid">
+            <Field
+              error={visibleErrors.totalBudgetHome}
+              label={`Total budget (${form.homeCurrency || 'home'})`}
+              name="totalBudgetHome"
+            >
+              <input
+                id="totalBudgetHome"
+                name="totalBudgetHome"
+                type="number"
+                min="0"
+                step="0.01"
+                inputMode="decimal"
+                value={form.totalBudgetHome}
+                onBlur={() => markTouched('totalBudgetHome')}
+                onChange={(event) => updateField('totalBudgetHome', event.target.value)}
+              />
+            </Field>
+
+            <Field
+              error={visibleErrors.exchangeRateJpy}
+              label="JPY per 1 home currency"
+              name="exchangeRateJpy"
+            >
+              <input
+                id="exchangeRateJpy"
+                name="exchangeRateJpy"
+                type="number"
+                min="0"
+                step="0.0001"
+                inputMode="decimal"
+                value={form.exchangeRateJpy}
+                onBlur={() => markTouched('exchangeRateJpy')}
+                onChange={(event) => updateField('exchangeRateJpy', event.target.value)}
+              />
+            </Field>
+          </div>
+
+          <div className="budget-preview" aria-live="polite">
+            <span>Budget preview</span>
+            <strong>{budgetPreview}</strong>
+          </div>
+
+          <button className="setup-submit" type="submit" disabled={!validation.isValid || isSaving}>
+            {isSaving ? 'Saving trip...' : 'Create trip'}
+          </button>
+        </form>
+      </section>
+    </main>
+  )
+}
+
+type FieldProps = {
+  children: ReactElement
+  error?: string
+  label: string
+  name: keyof TripSetupInput
+}
+
+function Field({ children, error, label, name }: FieldProps) {
+  return (
+    <label className="field" htmlFor={name}>
+      <span>{label}</span>
+      {children}
+      {error && (
+        <span className="field-error" id={`${name}-error`}>
+          {error}
+        </span>
+      )}
+    </label>
+  )
+}
+
+function getVisibleErrors(
+  errors: TripValidationErrors,
+  touched: Partial<Record<keyof TripSetupInput, boolean>>,
+): TripValidationErrors {
+  return Object.fromEntries(
+    Object.entries(errors).filter(([field]) => touched[field as keyof TripSetupInput]),
+  ) as TripValidationErrors
+}
+
+function formatDate(value: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(`${value}T00:00:00.000Z`))
 }
 
 function TabIcon({ icon }: { icon: Tab['icon'] }) {
