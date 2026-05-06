@@ -231,6 +231,34 @@ export function createExpenseEntry(
   return entry
 }
 
+export function updateExpenseEntry(
+  existingEntry: ExpenseEntry,
+  input: ExpenseInput,
+  now = new Date(),
+): ExpenseEntry {
+  const entry: ExpenseEntry = {
+    id: existingEntry.id,
+    tripId: existingEntry.tripId,
+    type: 'expense',
+    date: input.date,
+    amountJpy: Number(input.amountJpy),
+    category: input.category as ExpenseCategory,
+    createdAt: existingEntry.createdAt,
+    updatedAt: now.toISOString(),
+  }
+  const note = input.note.trim()
+
+  if (input.paymentMethod) {
+    entry.paymentMethod = input.paymentMethod as PaymentMethod
+  }
+
+  if (note) {
+    entry.note = note
+  }
+
+  return entry
+}
+
 export function validateCashWithdrawalInput(
   input: CashWithdrawalInput,
 ): CashWithdrawalValidationResult {
@@ -274,6 +302,29 @@ export function createCashWithdrawalEntry(
     amountJpy: Number(input.amountJpy),
     createdAt: timestamp,
     updatedAt: timestamp,
+  }
+  const note = input.note.trim()
+
+  if (note) {
+    entry.note = note
+  }
+
+  return entry
+}
+
+export function updateCashWithdrawalEntry(
+  existingEntry: CashWithdrawalEntry,
+  input: CashWithdrawalInput,
+  now = new Date(),
+): CashWithdrawalEntry {
+  const entry: CashWithdrawalEntry = {
+    id: existingEntry.id,
+    tripId: existingEntry.tripId,
+    type: 'cashWithdrawal',
+    date: input.date,
+    amountJpy: Number(input.amountJpy),
+    createdAt: existingEntry.createdAt,
+    updatedAt: now.toISOString(),
   }
   const note = input.note.trim()
 

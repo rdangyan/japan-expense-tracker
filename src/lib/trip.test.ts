@@ -8,6 +8,8 @@ import {
   createTripSettings,
   formatHomeCurrency,
   formatJpy,
+  updateCashWithdrawalEntry,
+  updateExpenseEntry,
   validateCashWithdrawalInput,
   validateExpenseInput,
   validateTripSetup,
@@ -242,5 +244,67 @@ describe('expense entries', () => {
         withdrawal,
       ]),
     ).toBe(1480)
+  })
+
+  it('updates an expense without changing immutable identity fields', () => {
+    const original = createExpenseEntry(
+      'trip-123',
+      validExpenseInput,
+      new Date('2026-04-06T01:02:03.000Z'),
+    )
+
+    const updated = updateExpenseEntry(
+      original,
+      {
+        amountJpy: '2100',
+        category: 'Transit',
+        date: '2026-04-08',
+        paymentMethod: '',
+        note: '  subway day pass  ',
+      },
+      new Date('2026-04-09T05:06:07.000Z'),
+    )
+
+    expect(updated).toEqual({
+      id: original.id,
+      tripId: 'trip-123',
+      type: 'expense',
+      date: '2026-04-08',
+      amountJpy: 2100,
+      category: 'Transit',
+      note: 'subway day pass',
+      createdAt: '2026-04-06T01:02:03.000Z',
+      updatedAt: '2026-04-09T05:06:07.000Z',
+    })
+    expect('paymentMethod' in updated).toBe(false)
+  })
+
+  it('updates a cash withdrawal without changing immutable identity fields', () => {
+    const original = createCashWithdrawalEntry(
+      'trip-123',
+      validWithdrawalInput,
+      new Date('2026-04-07T01:02:03.000Z'),
+    )
+
+    const updated = updateCashWithdrawalEntry(
+      original,
+      {
+        amountJpy: '20000',
+        date: '2026-04-09',
+        note: '',
+      },
+      new Date('2026-04-09T05:06:07.000Z'),
+    )
+
+    expect(updated).toEqual({
+      id: original.id,
+      tripId: 'trip-123',
+      type: 'cashWithdrawal',
+      date: '2026-04-09',
+      amountJpy: 20000,
+      createdAt: '2026-04-07T01:02:03.000Z',
+      updatedAt: '2026-04-09T05:06:07.000Z',
+    })
+    expect('note' in updated).toBe(false)
   })
 })

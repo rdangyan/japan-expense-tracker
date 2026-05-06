@@ -106,6 +106,7 @@ button {
   display: grid;
   gap: 16px;
   flex: 1;
+  min-height: 0;
 }
 
 .setup-page {
@@ -420,8 +421,10 @@ h3 {
 
 .tab-panel {
   min-height: 26rem;
+  max-height: calc(100svh - 9rem);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .tab-heading {
@@ -541,6 +544,53 @@ h3 {
   border-radius: 8px;
 }
 
+.entry-management {
+  min-height: 0;
+  padding: 18px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
+  flex: 1;
+  overflow: hidden;
+}
+
+.managed-entry-list {
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  list-style: none;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.managed-entry-card {
+  position: relative;
+  min-width: 0;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.managed-entry-main {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.managed-entry-main strong {
+  color: var(--text-strong);
+  font-size: 1.12rem;
+  line-height: 1.15;
+}
+
 .entry-badge {
   width: fit-content;
   max-width: 100%;
@@ -569,6 +619,70 @@ h3 {
   color: var(--text-muted);
   font-size: 0.86rem;
   font-weight: 680;
+}
+
+.entry-actions {
+  position: relative;
+  align-self: start;
+}
+
+.entry-actions summary {
+  width: 42px;
+  min-height: 42px;
+  display: grid;
+  place-items: center;
+  color: var(--text-strong);
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.entry-actions summary::-webkit-details-marker {
+  display: none;
+}
+
+.entry-actions summary:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.entry-actions-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 5;
+  width: 10rem;
+  padding: 6px;
+  display: grid;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+}
+
+.entry-actions-menu button {
+  min-height: 40px;
+  padding: 0 10px;
+  color: var(--text-strong);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 760;
+}
+
+.entry-actions-menu button:hover,
+.entry-actions-menu button:focus-visible {
+  background: var(--surface-strong);
+  outline: 0;
+}
+
+.entry-actions-menu .danger-menu-item {
+  color: var(--danger);
 }
 
 .empty-icon {
@@ -718,6 +832,65 @@ svg {
   gap: 14px;
 }
 
+.dialog-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.dialog-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(18, 14, 11, 0.56);
+}
+
+.confirm-dialog {
+  position: relative;
+  width: min(100%, 30rem);
+  padding: 20px;
+  display: grid;
+  gap: 16px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+}
+
+.confirm-dialog > p {
+  color: var(--text-muted);
+}
+
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.dialog-actions .secondary-action {
+  margin-top: 0;
+}
+
+.danger-action {
+  min-height: 44px;
+  padding: 0 18px;
+  color: #fffaf6;
+  background: var(--danger);
+  border: 0;
+  border-radius: 14px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.danger-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.68;
+}
+
 button:focus-visible,
 a:focus-visible {
   outline: 3px solid var(--focus);
@@ -767,6 +940,10 @@ a:focus-visible {
   .overview-panel,
   .tab-panel {
     min-height: 34rem;
+  }
+
+  .tab-panel {
+    max-height: calc(100svh - 10.5rem);
   }
 
   .overview-panel {

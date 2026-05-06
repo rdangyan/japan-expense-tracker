@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, ReactElement } from 'react'
 import './App.css'
 import {
@@ -12,10 +12,13 @@ import {
   formatHomeCurrency,
   formatJpy,
   paymentMethods,
+  updateCashWithdrawalEntry,
+  updateExpenseEntry,
   validateCashWithdrawalInput,
   validateExpenseInput,
   validateTripSetup,
   calculateExpenseTotalJpy,
+  type CashWithdrawalEntry,
   type CashWithdrawalInput,
   type CashWithdrawalValidationErrors,
   type ExpenseInput,
@@ -29,6 +32,7 @@ import {
 } from './lib/trip'
 import { createDemoTrip } from './lib/demoTrip'
 import {
+  deleteTripEntry,
   getActiveTrip,
   getEntriesForTrip,
   saveActiveTrip,
@@ -76,6 +80,10 @@ function App() {
   const [trip, setTrip] = useState<TripSettings | null>(null)
   const [entries, setEntries] = useState<TripEntry[]>([])
   const [isExpenseSheetOpen, setIsExpenseSheetOpen] = useState(false)
+  const [editingEntry, setEditingEntry] = useState<TripEntry | null>(null)
+  const [deletingEntry, setDeletingEntry] = useState<TripEntry | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [isLoadingTrip, setIsLoadingTrip] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const currentTab = tabs.find((tab) => tab.id === activeTab) ?? tabs[0]
@@ -164,7 +172,10 @@ function App() {
             className="icon-button"
             type="button"
             aria-label="Open add expense form"
-            onClick={() => setIsExpenseSheetOpen(true)}
+            onClick={() => {
+              setEditingEntry(null)
+              setIsExpenseSheetOpen(true)
+            }}
           >
             <PlusIcon />
           </button>
@@ -234,7 +245,10 @@ function App() {
                 className="primary-action"
                 type="button"
                 aria-label="Open add expense form"
-                onClick={() => setIsExpenseSheetOpen(true)}
+                onClick={() => {
+                  setEditingEntry(null)
+                  setIsExpenseSheetOpen(true)
+                }}
               >
                 <PlusIcon />
                 <span>Add</span>
@@ -242,55 +256,66 @@ function App() {
             )}
           </div>
 
-          <div className="empty-state">
-            <div className="empty-icon" aria-hidden="true">
-              <TabIcon icon={currentTab.icon} />
+          {activeTab === 'expenses' && hasEntries ? (
+            <EntryManagementList
+              entries={entries}
+              trip={trip}
+              onEdit={(entry) => {
+                setEditingEntry(entry)
+                setIsExpenseSheetOpen(true)
+              }}
+              onDelete={(entry) => {
+                setDeleteError(null)
+                setDeletingEntry(entry)
+              }}
+            />
+          ) : (
+            <div className="empty-state">
+              <div className="empty-icon" aria-hidden="true">
+                <TabIcon icon={currentTab.icon} />
+              </div>
+              <p className="empty-eyebrow">{emptyState.eyebrow}</p>
+
+              {activeTab === 'settings' && (
+                <dl className="settings-summary" aria-label="Persisted trip settings">
+                  <div>
+                    <dt>Trip</dt>
+                    <dd>{trip.tripName}</dd>
+                  </div>
+                  <div>
+                    <dt>Budget</dt>
+                    <dd>{formatHomeCurrency(trip.totalBudgetHome, trip.homeCurrency)}</dd>
+                  </div>
+                  <div>
+                    <dt>Rate</dt>
+                    <dd>
+                      1 {trip.homeCurrency} = {formatJpy(trip.exchangeRateJpy)}
+                    </dd>
+                  </div>
+                </dl>
+              )}
+              {activeTab === 'dashboard' && hasEntries && (
+                <PopulatedEntryPreview entries={entries} trip={trip} view={activeTab} />
+              )}
+              {activeTab !== 'settings' && !hasEntries && (
+                <button
+                  className="secondary-action"
+                  type="button"
+                  onClick={() => {
+                    setEditingEntry(null)
+                    setIsExpenseSheetOpen(true)
+                  }}
+                >
+                  Add expense
+                </button>
+              )}
+              {activeTab === 'settings' && (
+                <button className="secondary-action" type="button" disabled>
+                  {emptyState.action}
+                </button>
+              )}
             </div>
-            <p className="empty-eyebrow">{emptyState.eyebrow}</p>
-            <h3>
-              {activeTab !== 'settings' && hasEntries
-                ? activeTab === 'dashboard'
-                  ? 'Spending totals are up to date.'
-                  : 'Your saved entries are ready.'
-                : emptyState.title}
-            </h3>
-            <p>
-              {activeTab !== 'settings' && hasEntries
-                ? 'New expenses persist locally and update these JPY-first totals immediately.'
-                : emptyState.body}
-            </p>
-            {activeTab === 'settings' && (
-              <dl className="settings-summary" aria-label="Persisted trip settings">
-                <div>
-                  <dt>Trip</dt>
-                  <dd>{trip.tripName}</dd>
-                </div>
-                <div>
-                  <dt>Budget</dt>
-                  <dd>{formatHomeCurrency(trip.totalBudgetHome, trip.homeCurrency)}</dd>
-                </div>
-                <div>
-                  <dt>Rate</dt>
-                  <dd>
-                    1 {trip.homeCurrency} = {formatJpy(trip.exchangeRateJpy)}
-                  </dd>
-                </div>
-              </dl>
-            )}
-            {activeTab !== 'settings' && hasEntries && (
-              <PopulatedEntryPreview entries={entries} trip={trip} view={activeTab} />
-            )}
-            {activeTab !== 'settings' && !hasEntries && (
-              <button className="secondary-action" type="button" onClick={() => setIsExpenseSheetOpen(true)}>
-                Add expense
-              </button>
-            )}
-            {activeTab === 'settings' && (
-              <button className="secondary-action" type="button" disabled>
-                {emptyState.action}
-              </button>
-            )}
-          </div>
+          )}
         </section>
       </main>
 
@@ -317,13 +342,43 @@ function App() {
 
       <ExpenseBottomSheet
         isOpen={isExpenseSheetOpen}
+        editingEntry={editingEntry}
         trip={trip}
-        onClose={() => setIsExpenseSheetOpen(false)}
-        onSaved={(entry) => {
-          setEntries((current) => [...current, entry].sort(compareEntriesByDateThenCreated))
+        onClose={() => {
           setIsExpenseSheetOpen(false)
+          setEditingEntry(null)
+        }}
+        onSaved={(entry) => {
+          setEntries((current) =>
+            upsertEntry(current, entry).sort(compareEntriesByDateThenCreated),
+          )
+          setIsExpenseSheetOpen(false)
+          setEditingEntry(null)
         }}
       />
+
+      {deletingEntry && (
+        <DeleteEntryDialog
+          entry={deletingEntry}
+          error={deleteError}
+          isDeleting={isDeleting}
+          onCancel={() => {
+            setDeletingEntry(null)
+            setDeleteError(null)
+          }}
+          onConfirm={() => {
+            setIsDeleting(true)
+            setDeleteError(null)
+            deleteTripEntry(deletingEntry.id)
+              .then(() => {
+                setEntries((current) => current.filter((entry) => entry.id !== deletingEntry.id))
+                setDeletingEntry(null)
+              })
+              .catch(() => setDeleteError('Entry could not be deleted in this browser.'))
+              .finally(() => setIsDeleting(false))
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -587,6 +642,7 @@ function TripSetupScreen({ loadError, onTripCreated }: TripSetupScreenProps) {
 
 type ExpenseBottomSheetProps = {
   isOpen: boolean
+  editingEntry: TripEntry | null
   trip: TripSettings
   onClose: () => void
   onSaved: (entry: TripEntry) => void
@@ -615,7 +671,13 @@ const paymentMethodLabels: Record<PaymentMethod, string> = {
 
 type AddEntryType = 'expense' | 'cashWithdrawal'
 
-function ExpenseBottomSheet({ isOpen, trip, onClose, onSaved }: ExpenseBottomSheetProps) {
+function ExpenseBottomSheet({
+  isOpen,
+  editingEntry,
+  trip,
+  onClose,
+  onSaved,
+}: ExpenseBottomSheetProps) {
   const [entryType, setEntryType] = useState<AddEntryType>('expense')
   const [form, setForm] = useState<ExpenseInput>(() => ({
     ...blankExpenseForm,
@@ -631,6 +693,8 @@ function ExpenseBottomSheet({ isOpen, trip, onClose, onSaved }: ExpenseBottomShe
   >({})
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const isEditing = editingEntry !== null
   const expenseValidation = useMemo(() => validateExpenseInput(form), [form])
   const withdrawalValidation = useMemo(
     () => validateCashWithdrawalInput(withdrawalForm),
@@ -651,14 +715,49 @@ function ExpenseBottomSheet({ isOpen, trip, onClose, onSaved }: ExpenseBottomShe
 
   useEffect(() => {
     if (isOpen) {
-      setEntryType('expense')
-      setForm({ ...blankExpenseForm, date: trip.startDate })
-      setWithdrawalForm({ ...blankCashWithdrawalForm, date: trip.startDate })
+      if (editingEntry?.type === 'expense') {
+        setEntryType('expense')
+        setForm({
+          amountJpy: String(editingEntry.amountJpy),
+          category: editingEntry.category,
+          date: editingEntry.date,
+          paymentMethod: editingEntry.paymentMethod ?? '',
+          note: editingEntry.note ?? '',
+        })
+      } else if (editingEntry?.type === 'cashWithdrawal') {
+        setEntryType('cashWithdrawal')
+        setWithdrawalForm({
+          amountJpy: String(editingEntry.amountJpy),
+          date: editingEntry.date,
+          note: editingEntry.note ?? '',
+        })
+      } else {
+        setEntryType('expense')
+        setForm({ ...blankExpenseForm, date: trip.startDate })
+        setWithdrawalForm({ ...blankCashWithdrawalForm, date: trip.startDate })
+      }
       setTouched({})
       setWithdrawalTouched({})
       setSubmitError(null)
+      window.setTimeout(() => closeButtonRef.current?.focus(), 0)
     }
-  }, [isOpen, trip.startDate])
+  }, [editingEntry, isOpen, trip.startDate])
+
+  useEffect(() => {
+    if (!isOpen) {
+      return
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        onClose()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, onClose])
 
   if (!isOpen) {
     return null
@@ -702,7 +801,11 @@ function ExpenseBottomSheet({ isOpen, trip, onClose, onSaved }: ExpenseBottomShe
         return
       }
 
-      saveEntry(createExpenseEntry(trip.tripId, form))
+      saveEntry(
+        editingEntry?.type === 'expense'
+          ? updateExpenseEntry(editingEntry, form)
+          : createExpenseEntry(trip.tripId, form),
+      )
       return
     }
 
@@ -716,7 +819,11 @@ function ExpenseBottomSheet({ isOpen, trip, onClose, onSaved }: ExpenseBottomShe
       return
     }
 
-    saveEntry(createCashWithdrawalEntry(trip.tripId, withdrawalForm))
+    saveEntry(
+      editingEntry?.type === 'cashWithdrawal'
+        ? updateCashWithdrawalEntry(editingEntry, withdrawalForm)
+        : createCashWithdrawalEntry(trip.tripId, withdrawalForm),
+    )
   }
 
   function saveEntry(entry: TripEntry) {
@@ -729,12 +836,19 @@ function ExpenseBottomSheet({ isOpen, trip, onClose, onSaved }: ExpenseBottomShe
       .finally(() => setIsSaving(false))
   }
 
-  const sheetTitle = entryType === 'expense' ? 'New expense' : 'New cash withdrawal'
+  const sheetTitle =
+    entryType === 'expense'
+      ? isEditing
+        ? 'Edit expense'
+        : 'New expense'
+      : isEditing
+        ? 'Edit cash withdrawal'
+        : 'New cash withdrawal'
   const amountLabel = entryType === 'expense' ? 'Amount (JPY)' : 'Withdrawal amount (JPY)'
 
   return (
     <div className="sheet-layer" role="presentation">
-      <button className="sheet-backdrop" type="button" aria-label="Close add expense form" onClick={onClose} />
+      <button className="sheet-backdrop" type="button" aria-label="Close entry form" onClick={onClose} />
       <section
         className="bottom-sheet"
         aria-labelledby="expense-sheet-title"
@@ -744,10 +858,16 @@ function ExpenseBottomSheet({ isOpen, trip, onClose, onSaved }: ExpenseBottomShe
         <div className="sheet-handle" aria-hidden="true" />
         <div className="sheet-header">
           <div>
-            <p className="section-kicker">Add entry</p>
+            <p className="section-kicker">{isEditing ? 'Edit entry' : 'Add entry'}</p>
             <h2 id="expense-sheet-title">{sheetTitle}</h2>
           </div>
-          <button className="icon-button" type="button" aria-label="Close add expense form" onClick={onClose}>
+          <button
+            ref={closeButtonRef}
+            className="icon-button"
+            type="button"
+            aria-label="Close entry form"
+            onClick={onClose}
+          >
             <CloseIcon />
           </button>
         </div>
@@ -756,6 +876,7 @@ function ExpenseBottomSheet({ isOpen, trip, onClose, onSaved }: ExpenseBottomShe
           <button
             type="button"
             data-active={entryType === 'expense'}
+            disabled={isEditing}
             onClick={() => setEntryType('expense')}
           >
             Expense
@@ -763,6 +884,7 @@ function ExpenseBottomSheet({ isOpen, trip, onClose, onSaved }: ExpenseBottomShe
           <button
             type="button"
             data-active={entryType === 'cashWithdrawal'}
+            disabled={isEditing}
             onClick={() => setEntryType('cashWithdrawal')}
           >
             Cash withdrawal
@@ -894,12 +1016,196 @@ function ExpenseBottomSheet({ isOpen, trip, onClose, onSaved }: ExpenseBottomShe
 
           <button className="setup-submit" type="submit" disabled={!activeValidation.isValid || isSaving}>
             {isSaving
-              ? 'Saving entry...'
+              ? isEditing
+                ? 'Updating entry...'
+                : 'Saving entry...'
               : entryType === 'expense'
-                ? 'Save expense'
-                : 'Save withdrawal'}
+                ? isEditing
+                  ? 'Update expense'
+                  : 'Save expense'
+                : isEditing
+                  ? 'Update withdrawal'
+                  : 'Save withdrawal'}
           </button>
         </form>
+      </section>
+    </div>
+  )
+}
+
+type EntryManagementListProps = {
+  entries: TripEntry[]
+  trip: TripSettings
+  onEdit: (entry: TripEntry) => void
+  onDelete: (entry: TripEntry) => void
+}
+
+function EntryManagementList({ entries, trip, onEdit, onDelete }: EntryManagementListProps) {
+  const chronologicalEntries = [...entries].sort(
+    (first, second) =>
+      second.date.localeCompare(first.date) || second.createdAt.localeCompare(first.createdAt),
+  )
+  const expenseEntries = entries.filter((entry): entry is ExpenseEntry => entry.type === 'expense')
+  const withdrawalEntries = entries.filter(
+    (entry): entry is CashWithdrawalEntry => entry.type === 'cashWithdrawal',
+  )
+  const totalSpentJpy = calculateExpenseTotalJpy(entries)
+  const withdrawalTotalJpy = withdrawalEntries.reduce((total, entry) => total + entry.amountJpy, 0)
+
+  return (
+    <div className="entry-management">
+      <dl className="entry-stats" aria-label="Entry history totals">
+        <div>
+          <dt>Entries</dt>
+          <dd>{entries.length}</dd>
+        </div>
+        <div>
+          <dt>Expense total</dt>
+          <dd>
+            {formatJpy(totalSpentJpy)}
+            <span>{formatHomeCurrency(convertJpyToHome(totalSpentJpy, trip.exchangeRateJpy), trip.homeCurrency)}</span>
+          </dd>
+        </div>
+        <div>
+          <dt>Expenses</dt>
+          <dd>{expenseEntries.length}</dd>
+        </div>
+        <div>
+          <dt>Withdrawals</dt>
+          <dd>
+            {formatJpy(withdrawalTotalJpy)}
+            <span>{withdrawalEntries.length} logged</span>
+          </dd>
+        </div>
+      </dl>
+
+      <ul className="managed-entry-list" aria-label="Expense and cash withdrawal history">
+        {chronologicalEntries.map((entry) => (
+          <li key={entry.id} className="managed-entry-card">
+            <div className="managed-entry-main">
+              <span className="entry-badge" data-entry-type={entry.type}>
+                {entry.type === 'expense' ? 'Expense' : 'Cash withdrawal'}
+              </span>
+              <strong>{formatJpy(entry.amountJpy)}</strong>
+              <span className="entry-note">
+                {entry.note || (entry.type === 'expense' ? `${entry.category} expense` : 'Cash withdrawal')}
+              </span>
+              <span className="entry-meta">
+                {formatDate(entry.date)}
+                {entry.type === 'expense' && (
+                  <>
+                    {' '}
+                    &middot; {entry.category}
+                    {entry.paymentMethod && (
+                      <>
+                        {' '}
+                        &middot; {paymentMethodLabels[entry.paymentMethod]}
+                      </>
+                    )}
+                  </>
+                )}
+              </span>
+            </div>
+            <details className="entry-actions">
+              <summary aria-label={`Open actions for ${entry.note || formatJpy(entry.amountJpy)}`}>
+                <MoreIcon />
+              </summary>
+              <div className="entry-actions-menu" role="menu">
+                <button type="button" role="menuitem" onClick={() => onEdit(entry)}>
+                  Edit
+                </button>
+                <button
+                  className="danger-menu-item"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => onDelete(entry)}
+                >
+                  Delete
+                </button>
+              </div>
+            </details>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+type DeleteEntryDialogProps = {
+  entry: TripEntry
+  error: string | null
+  isDeleting: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}
+
+function DeleteEntryDialog({
+  entry,
+  error,
+  isDeleting,
+  onCancel,
+  onConfirm,
+}: DeleteEntryDialogProps) {
+  const cancelButtonRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    cancelButtonRef.current?.focus()
+  }, [])
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        onCancel()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onCancel])
+
+  return (
+    <div className="dialog-layer" role="presentation">
+      <div className="dialog-backdrop" />
+      <section
+        className="confirm-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="delete-entry-title"
+        aria-describedby="delete-entry-description"
+      >
+        <div>
+          <p className="section-kicker">Delete entry</p>
+          <h2 id="delete-entry-title">Remove this trip entry?</h2>
+        </div>
+        <p id="delete-entry-description">
+          {formatJpy(entry.amountJpy)} from {formatDate(entry.date)} will be permanently removed from
+          this browser.
+        </p>
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="dialog-actions">
+          <button
+            ref={cancelButtonRef}
+            className="secondary-action"
+            type="button"
+            disabled={isDeleting}
+            onClick={onCancel}
+          >
+            Cancel
+          </button>
+          <button
+            className="danger-action"
+            type="button"
+            disabled={isDeleting}
+            onClick={onConfirm}
+          >
+            {isDeleting ? 'Deleting...' : 'Delete'}
+          </button>
+        </div>
       </section>
     </div>
   )
@@ -1038,6 +1344,16 @@ function compareEntriesByDateThenCreated(first: TripEntry, second: TripEntry): n
   return first.date.localeCompare(second.date) || first.createdAt.localeCompare(second.createdAt)
 }
 
+function upsertEntry(entries: TripEntry[], nextEntry: TripEntry): TripEntry[] {
+  const existingIndex = entries.findIndex((entry) => entry.id === nextEntry.id)
+
+  if (existingIndex === -1) {
+    return [...entries, nextEntry]
+  }
+
+  return entries.map((entry, index) => (index === existingIndex ? nextEntry : entry))
+}
+
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat(undefined, {
     month: 'short',
@@ -1093,6 +1409,16 @@ function ReceiptIcon() {
       <path d="M7 4h10a2 2 0 0 1 2 2v14l-3-1.5L13 20l-3-1.5L7 20l-2-1V6a2 2 0 0 1 2-2Z" />
       <path d="M8 9h8" />
       <path d="M8 13h6" />
+    </svg>
+  )
+}
+
+function MoreIcon() {
+  return (
+    <svg viewBox="0 0 24 24" role="presentation" aria-hidden="true">
+      <path d="M12 12h.01" />
+      <path d="M19 12h.01" />
+      <path d="M5 12h.01" />
     </svg>
   )
 }
