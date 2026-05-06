@@ -49,6 +49,20 @@ export type ExpenseCategory = (typeof expenseCategories)[number]
 
 export type PaymentMethod = (typeof paymentMethods)[number]
 
+export const paymentMethodLabels: Record<PaymentMethod, string> = {
+  cash: 'Cash',
+  card: 'Card',
+  icCard: 'IC card',
+  other: 'Other',
+}
+
+export const entryTypeLabels: Record<TripEntryType, string> = {
+  expense: 'Expense',
+  cashWithdrawal: 'Cash withdrawal',
+}
+
+export type TripEntryType = 'expense' | 'cashWithdrawal'
+
 export type BaseTripEntry = {
   id: string
   tripId: string
@@ -70,6 +84,33 @@ export type CashWithdrawalEntry = BaseTripEntry & {
 }
 
 export type TripEntry = ExpenseEntry | CashWithdrawalEntry
+
+export type EntryTypeFilter = 'all' | TripEntryType
+
+export type EntryCategoryFilter = 'all' | ExpenseCategory
+
+export type EntryPaymentMethodFilter = 'all' | PaymentMethod
+
+export type EntrySortOrder = 'newest' | 'oldest' | 'amount'
+
+export type EntryListOptions = {
+  searchQuery?: string
+  entryType?: EntryTypeFilter
+  category?: EntryCategoryFilter
+  paymentMethod?: EntryPaymentMethodFilter
+  startDate?: string
+  endDate?: string
+  sortOrder?: EntrySortOrder
+}
+
+export type EntryListView = {
+  entries: TripEntry[]
+  filteredCount: number
+  expenseTotalJpy: number
+  withdrawalTotalJpy: number
+  contextualTotalJpy: number
+  contextualTotalLabel: 'Spending total' | 'Withdrawal total'
+}
 
 export type ExpenseInput = {
   amountJpy: string
@@ -342,6 +383,65 @@ export function calculateExpenseTotalJpy(entries: TripEntry[]): number {
   )
 }
 
+export function getEntryListView(
+  entries: TripEntry[],
+  options: EntryListOptions = {},
+): EntryListView {
+  const searchQuery = normalizeSearchText(options.searchQuery ?? '')
+  const entryType = options.entryType ?? 'all'
+  const category = options.category ?? 'all'
+  const paymentMethod = options.paymentMethod ?? 'all'
+  const sortOrder = options.sortOrder ?? 'newest'
+
+  const filteredEntries = entries
+    .filter((entry) => {
+      if (entryType !== 'all' && entry.type !== entryType) {
+        return false
+      }
+
+      if (category !== 'all' && (entry.type !== 'expense' || entry.category !== category)) {
+        return false
+      }
+
+      if (
+        paymentMethod !== 'all' &&
+        (entry.type !== 'expense' || entry.paymentMethod !== paymentMethod)
+      ) {
+        return false
+      }
+
+      if (options.startDate && entry.date < options.startDate) {
+        return false
+      }
+
+      if (options.endDate && entry.date > options.endDate) {
+        return false
+      }
+
+      if (searchQuery && !getEntrySearchText(entry).includes(searchQuery)) {
+        return false
+      }
+
+      return true
+    })
+    .sort((first, second) => compareEntriesForSort(first, second, sortOrder))
+  const expenseTotalJpy = calculateExpenseTotalJpy(filteredEntries)
+  const withdrawalTotalJpy = filteredEntries.reduce(
+    (total, entry) => (entry.type === 'cashWithdrawal' ? total + entry.amountJpy : total),
+    0,
+  )
+  const showingWithdrawalTotal = entryType === 'cashWithdrawal'
+
+  return {
+    entries: filteredEntries,
+    filteredCount: filteredEntries.length,
+    expenseTotalJpy,
+    withdrawalTotalJpy,
+    contextualTotalJpy: showingWithdrawalTotal ? withdrawalTotalJpy : expenseTotalJpy,
+    contextualTotalLabel: showingWithdrawalTotal ? 'Withdrawal total' : 'Spending total',
+  }
+}
+
 export function convertHomeToJpy(amountHome: number, exchangeRateJpy: number): number {
   return Math.round(amountHome * exchangeRateJpy)
 }
@@ -381,6 +481,44 @@ function isKnownExpenseCategory(category: string): category is ExpenseCategory {
 
 function isKnownPaymentMethod(method: string): method is PaymentMethod {
   return paymentMethods.includes(method as PaymentMethod)
+}
+
+function getEntrySearchText(entry: TripEntry): string {
+  const searchableParts = [
+    entry.note ?? '',
+    entryTypeLabels[entry.type],
+    entry.type === 'expense' ? entry.category : '',
+    entry.type === 'expense' && entry.paymentMethod ? paymentMethodLabels[entry.paymentMethod] : '',
+  ]
+
+  return normalizeSearchText(searchableParts.join(' '))
+}
+
+function normalizeSearchText(value: string): string {
+  return value.trim().toLocaleLowerCase()
+}
+
+function compareEntriesForSort(
+  first: TripEntry,
+  second: TripEntry,
+  sortOrder: EntrySortOrder,
+): number {
+  if (sortOrder === 'oldest') {
+    return compareEntriesByDateThenCreated(first, second)
+  }
+
+  if (sortOrder === 'amount') {
+    return (
+      second.amountJpy - first.amountJpy ||
+      compareEntriesByDateThenCreated(second, first)
+    )
+  }
+
+  return compareEntriesByDateThenCreated(second, first)
+}
+
+function compareEntriesByDateThenCreated(first: TripEntry, second: TripEntry): number {
+  return first.date.localeCompare(second.date) || first.createdAt.localeCompare(second.createdAt)
 }
 
 function createStableId(prefix: string): string {

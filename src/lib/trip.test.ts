@@ -8,6 +8,7 @@ import {
   createTripSettings,
   formatHomeCurrency,
   formatJpy,
+  getEntryListView,
   updateCashWithdrawalEntry,
   updateExpenseEntry,
   validateCashWithdrawalInput,
@@ -306,5 +307,84 @@ describe('expense entries', () => {
       updatedAt: '2026-04-09T05:06:07.000Z',
     })
     expect('note' in updated).toBe(false)
+  })
+})
+
+describe('entry list view', () => {
+  const ramen = createExpenseEntry(
+    'trip-123',
+    {
+      amountJpy: '1480',
+      category: 'Food',
+      date: '2026-04-06',
+      paymentMethod: 'cash',
+      note: 'Ameyoko ramen',
+    },
+    new Date('2026-04-06T01:00:00.000Z'),
+  )
+  const train = createExpenseEntry(
+    'trip-123',
+    {
+      amountJpy: '14200',
+      category: 'Transit',
+      date: '2026-04-09',
+      paymentMethod: 'card',
+      note: 'Tokyo to Kyoto shinkansen',
+    },
+    new Date('2026-04-09T01:00:00.000Z'),
+  )
+  const atm = createCashWithdrawalEntry(
+    'trip-123',
+    {
+      amountJpy: '10000',
+      date: '2026-04-07',
+      note: '7-Bank ATM Shinjuku',
+    },
+    new Date('2026-04-07T01:00:00.000Z'),
+  )
+  const entries = [ramen, train, atm]
+
+  it('searches notes, category labels, entry type labels, and payment method labels', () => {
+    expect(getEntryListView(entries, { searchQuery: 'ramen' }).entries).toEqual([ramen])
+    expect(getEntryListView(entries, { searchQuery: 'transit' }).entries).toEqual([train])
+    expect(getEntryListView(entries, { searchQuery: 'cash withdrawal' }).entries).toEqual([atm])
+    expect(getEntryListView(entries, { searchQuery: 'card' }).entries).toEqual([train])
+  })
+
+  it('filters by entry type, category, payment method, and date range', () => {
+    expect(getEntryListView(entries, { entryType: 'cashWithdrawal' }).entries).toEqual([atm])
+    expect(getEntryListView(entries, { category: 'Food' }).entries).toEqual([ramen])
+    expect(getEntryListView(entries, { paymentMethod: 'card' }).entries).toEqual([train])
+    expect(
+      getEntryListView(entries, {
+        startDate: '2026-04-07',
+        endDate: '2026-04-09',
+      }).entries,
+    ).toEqual([train, atm])
+  })
+
+  it('excludes cash withdrawals while a payment method filter is active', () => {
+    const view = getEntryListView(entries, { paymentMethod: 'cash' })
+
+    expect(view.entries).toEqual([ramen])
+    expect(view.withdrawalTotalJpy).toBe(0)
+  })
+
+  it('sorts by newest, oldest, and amount descending', () => {
+    expect(getEntryListView(entries, { sortOrder: 'newest' }).entries).toEqual([train, atm, ramen])
+    expect(getEntryListView(entries, { sortOrder: 'oldest' }).entries).toEqual([ramen, atm, train])
+    expect(getEntryListView(entries, { sortOrder: 'amount' }).entries).toEqual([train, atm, ramen])
+  })
+
+  it('returns contextual filtered totals and counts', () => {
+    const expenseView = getEntryListView(entries, { searchQuery: 'to' })
+    const withdrawalView = getEntryListView(entries, { entryType: 'cashWithdrawal' })
+
+    expect(expenseView.filteredCount).toBe(1)
+    expect(expenseView.contextualTotalLabel).toBe('Spending total')
+    expect(expenseView.contextualTotalJpy).toBe(14200)
+    expect(withdrawalView.filteredCount).toBe(1)
+    expect(withdrawalView.contextualTotalLabel).toBe('Withdrawal total')
+    expect(withdrawalView.contextualTotalJpy).toBe(10000)
   })
 })

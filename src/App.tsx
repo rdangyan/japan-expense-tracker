@@ -8,9 +8,12 @@ import {
   createExpenseEntry,
   createTripSettings,
   currencyPresets,
+  entryTypeLabels,
   expenseCategories,
   formatHomeCurrency,
   formatJpy,
+  getEntryListView,
+  paymentMethodLabels,
   paymentMethods,
   updateCashWithdrawalEntry,
   updateExpenseEntry,
@@ -18,13 +21,15 @@ import {
   validateExpenseInput,
   validateTripSetup,
   calculateExpenseTotalJpy,
-  type CashWithdrawalEntry,
   type CashWithdrawalInput,
   type CashWithdrawalValidationErrors,
+  type EntryCategoryFilter,
+  type EntryPaymentMethodFilter,
+  type EntrySortOrder,
+  type EntryTypeFilter,
   type ExpenseInput,
   type ExpenseValidationErrors,
   type ExpenseEntry,
-  type PaymentMethod,
   type TripEntry,
   type TripSettings,
   type TripSetupInput,
@@ -231,7 +236,7 @@ function App() {
         </section>
 
         <section
-          className="tab-panel"
+          className={`tab-panel ${activeTab === 'expenses' ? 'expenses-tab-panel' : ''}`}
           aria-labelledby={`${activeTab}-tab-title`}
           key={activeTab}
         >
@@ -267,6 +272,10 @@ function App() {
               onDelete={(entry) => {
                 setDeleteError(null)
                 setDeletingEntry(entry)
+              }}
+              onAdd={() => {
+                setEditingEntry(null)
+                setIsExpenseSheetOpen(true)
               }}
             />
           ) : (
@@ -662,13 +671,6 @@ const blankCashWithdrawalForm: CashWithdrawalInput = {
   note: '',
 }
 
-const paymentMethodLabels: Record<PaymentMethod, string> = {
-  cash: 'Cash',
-  card: 'Card',
-  icCard: 'IC card',
-  other: 'Other',
-}
-
 type AddEntryType = 'expense' | 'cashWithdrawal'
 
 function ExpenseBottomSheet({
@@ -1038,95 +1040,257 @@ type EntryManagementListProps = {
   trip: TripSettings
   onEdit: (entry: TripEntry) => void
   onDelete: (entry: TripEntry) => void
+  onAdd: () => void
 }
 
-function EntryManagementList({ entries, trip, onEdit, onDelete }: EntryManagementListProps) {
-  const chronologicalEntries = [...entries].sort(
-    (first, second) =>
-      second.date.localeCompare(first.date) || second.createdAt.localeCompare(first.createdAt),
+function EntryManagementList({ entries, trip, onEdit, onDelete, onAdd }: EntryManagementListProps) {
+  const [searchQuery, setSearchQuery] = useState('')
+  const [entryType, setEntryType] = useState<EntryTypeFilter>('all')
+  const [category, setCategory] = useState<EntryCategoryFilter>('all')
+  const [paymentMethod, setPaymentMethod] = useState<EntryPaymentMethodFilter>('all')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
+  const [sortOrder, setSortOrder] = useState<EntrySortOrder>('newest')
+  const entryListView = useMemo(
+    () =>
+      getEntryListView(entries, {
+        searchQuery,
+        entryType,
+        category,
+        paymentMethod,
+        startDate,
+        endDate,
+        sortOrder,
+      }),
+    [category, endDate, entries, entryType, paymentMethod, searchQuery, sortOrder, startDate],
   )
-  const expenseEntries = entries.filter((entry): entry is ExpenseEntry => entry.type === 'expense')
-  const withdrawalEntries = entries.filter(
-    (entry): entry is CashWithdrawalEntry => entry.type === 'cashWithdrawal',
-  )
-  const totalSpentJpy = calculateExpenseTotalJpy(entries)
-  const withdrawalTotalJpy = withdrawalEntries.reduce((total, entry) => total + entry.amountJpy, 0)
+  const hasActiveFilters =
+    searchQuery.trim() !== '' ||
+    entryType !== 'all' ||
+    category !== 'all' ||
+    paymentMethod !== 'all' ||
+    startDate !== '' ||
+    endDate !== ''
+
+  function clearFilters() {
+    setSearchQuery('')
+    setEntryType('all')
+    setCategory('all')
+    setPaymentMethod('all')
+    setStartDate('')
+    setEndDate('')
+  }
 
   return (
     <div className="entry-management">
-      <dl className="entry-stats" aria-label="Entry history totals">
+      <div className="entry-controls" aria-label="Search and filter entries">
+        <label className="field entry-search-field" htmlFor="entrySearch">
+          <span>Search entries</span>
+          <input
+            id="entrySearch"
+            name="entrySearch"
+            type="search"
+            placeholder="Search notes, categories, methods"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+          />
+        </label>
+
+        <div className="entry-filter-grid">
+          <label className="field" htmlFor="entryTypeFilter">
+            <span>Type</span>
+            <select
+              id="entryTypeFilter"
+              name="entryTypeFilter"
+              value={entryType}
+              onChange={(event) => setEntryType(event.target.value as EntryTypeFilter)}
+            >
+              <option value="all">All entries</option>
+              <option value="expense">{entryTypeLabels.expense}</option>
+              <option value="cashWithdrawal">{entryTypeLabels.cashWithdrawal}</option>
+            </select>
+          </label>
+
+          <label className="field" htmlFor="categoryFilter">
+            <span>Category</span>
+            <select
+              id="categoryFilter"
+              name="categoryFilter"
+              value={category}
+              onChange={(event) => setCategory(event.target.value as EntryCategoryFilter)}
+            >
+              <option value="all">All categories</option>
+              {expenseCategories.map((expenseCategory) => (
+                <option key={expenseCategory} value={expenseCategory}>
+                  {expenseCategory}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field" htmlFor="paymentMethodFilter">
+            <span>Payment</span>
+            <select
+              id="paymentMethodFilter"
+              name="paymentMethodFilter"
+              value={paymentMethod}
+              onChange={(event) =>
+                setPaymentMethod(event.target.value as EntryPaymentMethodFilter)
+              }
+            >
+              <option value="all">All methods</option>
+              {paymentMethods.map((method) => (
+                <option key={method} value={method}>
+                  {paymentMethodLabels[method]}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field" htmlFor="entryStartDate">
+            <span>From</span>
+            <input
+              id="entryStartDate"
+              name="entryStartDate"
+              type="date"
+              value={startDate}
+              onChange={(event) => setStartDate(event.target.value)}
+            />
+          </label>
+
+          <label className="field" htmlFor="entryEndDate">
+            <span>To</span>
+            <input
+              id="entryEndDate"
+              name="entryEndDate"
+              type="date"
+              value={endDate}
+              onChange={(event) => setEndDate(event.target.value)}
+            />
+          </label>
+
+          <label className="field" htmlFor="entrySortOrder">
+            <span>Sort</span>
+            <select
+              id="entrySortOrder"
+              name="entrySortOrder"
+              value={sortOrder}
+              onChange={(event) => setSortOrder(event.target.value as EntrySortOrder)}
+            >
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
+              <option value="amount">Amount</option>
+            </select>
+          </label>
+        </div>
+
+        {hasActiveFilters && (
+          <button className="clear-filters-button" type="button" onClick={clearFilters}>
+            Clear filters
+          </button>
+        )}
+      </div>
+
+      <dl className="entry-stats" aria-label="Filtered entry totals">
         <div>
-          <dt>Entries</dt>
-          <dd>{entries.length}</dd>
+          <dt>Filtered entries</dt>
+          <dd>
+            {entryListView.filteredCount}
+            <span>{entries.length} total</span>
+          </dd>
+        </div>
+        <div>
+          <dt>{entryListView.contextualTotalLabel}</dt>
+          <dd>
+            {formatJpy(entryListView.contextualTotalJpy)}
+            <span>
+              {formatHomeCurrency(
+                convertJpyToHome(entryListView.contextualTotalJpy, trip.exchangeRateJpy),
+                trip.homeCurrency,
+              )}
+            </span>
+          </dd>
         </div>
         <div>
           <dt>Expense total</dt>
-          <dd>
-            {formatJpy(totalSpentJpy)}
-            <span>{formatHomeCurrency(convertJpyToHome(totalSpentJpy, trip.exchangeRateJpy), trip.homeCurrency)}</span>
-          </dd>
-        </div>
-        <div>
-          <dt>Expenses</dt>
-          <dd>{expenseEntries.length}</dd>
+          <dd>{formatJpy(entryListView.expenseTotalJpy)}</dd>
         </div>
         <div>
           <dt>Withdrawals</dt>
-          <dd>
-            {formatJpy(withdrawalTotalJpy)}
-            <span>{withdrawalEntries.length} logged</span>
-          </dd>
+          <dd>{formatJpy(entryListView.withdrawalTotalJpy)}</dd>
         </div>
       </dl>
 
-      <ul className="managed-entry-list" aria-label="Expense and cash withdrawal history">
-        {chronologicalEntries.map((entry) => (
-          <li key={entry.id} className="managed-entry-card">
-            <div className="managed-entry-main">
-              <span className="entry-badge" data-entry-type={entry.type}>
-                {entry.type === 'expense' ? 'Expense' : 'Cash withdrawal'}
-              </span>
-              <strong>{formatJpy(entry.amountJpy)}</strong>
-              <span className="entry-note">
-                {entry.note || (entry.type === 'expense' ? `${entry.category} expense` : 'Cash withdrawal')}
-              </span>
-              <span className="entry-meta">
-                {formatDate(entry.date)}
-                {entry.type === 'expense' && (
-                  <>
-                    {' '}
-                    &middot; {entry.category}
-                    {entry.paymentMethod && (
-                      <>
-                        {' '}
-                        &middot; {paymentMethodLabels[entry.paymentMethod]}
-                      </>
-                    )}
-                  </>
-                )}
-              </span>
-            </div>
-            <details className="entry-actions">
-              <summary aria-label={`Open actions for ${entry.note || formatJpy(entry.amountJpy)}`}>
-                <MoreIcon />
-              </summary>
-              <div className="entry-actions-menu" role="menu">
-                <button type="button" role="menuitem" onClick={() => onEdit(entry)}>
-                  Edit
-                </button>
-                <button
-                  className="danger-menu-item"
-                  type="button"
-                  role="menuitem"
-                  onClick={() => onDelete(entry)}
-                >
-                  Delete
-                </button>
+      {entryListView.entries.length > 0 ? (
+        <ul className="managed-entry-list" aria-label="Expense and cash withdrawal history">
+          {entryListView.entries.map((entry) => (
+            <li key={entry.id} className="managed-entry-card">
+              <div className="managed-entry-main">
+                <span className="entry-badge" data-entry-type={entry.type}>
+                  {entryTypeLabels[entry.type]}
+                </span>
+                <strong>{formatJpy(entry.amountJpy)}</strong>
+                <span className="entry-note">
+                  {entry.note || (entry.type === 'expense' ? `${entry.category} expense` : 'Cash withdrawal')}
+                </span>
+                <span className="entry-meta">
+                  {formatDate(entry.date)}
+                  {entry.type === 'expense' && (
+                    <>
+                      {' '}
+                      &middot; {entry.category}
+                      {entry.paymentMethod && (
+                        <>
+                          {' '}
+                          &middot; {paymentMethodLabels[entry.paymentMethod]}
+                        </>
+                      )}
+                    </>
+                  )}
+                </span>
               </div>
-            </details>
-          </li>
-        ))}
-      </ul>
+              <details className="entry-actions">
+                <summary aria-label={`Open actions for ${entry.note || formatJpy(entry.amountJpy)}`}>
+                  <MoreIcon />
+                </summary>
+                <div className="entry-actions-menu" role="menu">
+                  <button type="button" role="menuitem" onClick={() => onEdit(entry)}>
+                    Edit
+                  </button>
+                  <button
+                    className="danger-menu-item"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => onDelete(entry)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </details>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="filtered-empty-state">
+          <div>
+            <p className="empty-eyebrow">No matching entries</p>
+            <h3>Try a wider search.</h3>
+            <p>
+              Adjust the filters, clear the current view, or add another entry if this trip is
+              missing something.
+            </p>
+          </div>
+          <div className="filtered-empty-actions">
+            <button className="secondary-action" type="button" onClick={clearFilters}>
+              Clear filters
+            </button>
+            <button className="primary-action" type="button" onClick={onAdd}>
+              <PlusIcon />
+              <span>Add</span>
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
