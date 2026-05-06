@@ -8,6 +8,7 @@ import {
   createTripSettings,
   formatHomeCurrency,
   formatJpy,
+  getDashboardAnalytics,
   getEntryListView,
   updateCashWithdrawalEntry,
   updateExpenseEntry,
@@ -17,6 +18,7 @@ import {
   type CashWithdrawalInput,
   type ExpenseInput,
   type TripSetupInput,
+  type TripSettings,
 } from './trip'
 
 const validInput: TripSetupInput = {
@@ -386,5 +388,155 @@ describe('entry list view', () => {
     expect(withdrawalView.filteredCount).toBe(1)
     expect(withdrawalView.contextualTotalLabel).toBe('Withdrawal total')
     expect(withdrawalView.contextualTotalJpy).toBe(10000)
+  })
+})
+
+describe('dashboard analytics', () => {
+  const trip: TripSettings = {
+    key: 'active-trip',
+    tripId: 'trip-analytics',
+    tripName: 'Analytics Trip',
+    startDate: '2026-04-06',
+    endDate: '2026-04-10',
+    homeCurrency: 'CAD',
+    totalBudgetHome: 1000,
+    exchangeRateJpy: 100,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  }
+
+  const firstDayFood = createExpenseEntry(
+    trip.tripId,
+    {
+      amountJpy: '10000',
+      category: 'Food',
+      date: '2026-04-06',
+      paymentMethod: 'cash',
+      note: 'ramen',
+    },
+    new Date('2026-04-06T01:00:00.000Z'),
+  )
+  const secondDayTransit = createExpenseEntry(
+    trip.tripId,
+    {
+      amountJpy: '20000',
+      category: 'Transit',
+      date: '2026-04-07',
+      paymentMethod: 'card',
+      note: 'rail pass',
+    },
+    new Date('2026-04-07T01:00:00.000Z'),
+  )
+  const outsideTripExpense = createExpenseEntry(
+    trip.tripId,
+    {
+      amountJpy: '5000',
+      category: 'Food',
+      date: '2026-04-12',
+      paymentMethod: '',
+      note: 'airport snack',
+    },
+    new Date('2026-04-12T01:00:00.000Z'),
+  )
+  const withdrawal = createCashWithdrawalEntry(
+    trip.tripId,
+    {
+      amountJpy: '50000',
+      date: '2026-04-07',
+      note: 'ATM',
+    },
+    new Date('2026-04-07T02:00:00.000Z'),
+  )
+  const entries = [firstDayFood, secondDayTransit, outsideTripExpense, withdrawal]
+
+  it('calculates budget totals and currency-derived pacing values', () => {
+    const view = getDashboardAnalytics(
+      trip,
+      entries,
+      new Date('2026-04-07T00:00:00.000Z'),
+    )
+
+    expect(view.budgetJpy).toBe(100000)
+    expect(view.totalSpentJpy).toBe(35000)
+    expect(view.remainingJpy).toBe(65000)
+    expect(view.originalDailyBudgetJpy).toBe(20000)
+    expect(view.daysElapsed).toBe(2)
+    expect(view.daysLeft).toBe(3)
+    expect(view.tripProgressPercent).toBe(40)
+    expect(view.dailyAverageJpy).toBe(15000)
+    expect(view.currentRemainingDailyAllowanceJpy).toBe(21667)
+  })
+
+  it('excludes cash withdrawals and outside-trip expenses from pacing', () => {
+    const view = getDashboardAnalytics(
+      trip,
+      entries,
+      new Date('2026-04-07T00:00:00.000Z'),
+    )
+
+    expect(view.inTripSpentToDateJpy).toBe(30000)
+    expect(view.expectedSpendToDateJpy).toBe(40000)
+    expect(view.budgetStatus).toBe('onTrack')
+    expect(view.outsideTripExpenseTotalJpy).toBe(5000)
+  })
+
+  it('uses caution and over-budget thresholds against expected spending', () => {
+    const cautionView = getDashboardAnalytics(
+      trip,
+      [
+        createExpenseEntry(
+          trip.tripId,
+          {
+            amountJpy: '40000',
+            category: 'Food',
+            date: '2026-04-06',
+            paymentMethod: '',
+            note: '',
+          },
+          new Date('2026-04-06T01:00:00.000Z'),
+        ),
+      ],
+      new Date('2026-04-07T00:00:00.000Z'),
+    )
+    const overView = getDashboardAnalytics(
+      trip,
+      [
+        createExpenseEntry(
+          trip.tripId,
+          {
+            amountJpy: '45000',
+            category: 'Food',
+            date: '2026-04-06',
+            paymentMethod: '',
+            note: '',
+          },
+          new Date('2026-04-06T01:00:00.000Z'),
+        ),
+      ],
+      new Date('2026-04-07T00:00:00.000Z'),
+    )
+
+    expect(cautionView.budgetStatus).toBe('caution')
+    expect(overView.budgetStatus).toBe('overBudget')
+  })
+
+  it('returns expense-only category totals and cumulative trip-day series', () => {
+    const view = getDashboardAnalytics(
+      trip,
+      entries,
+      new Date('2026-04-07T00:00:00.000Z'),
+    )
+
+    expect(view.categoryBreakdown).toEqual([
+      { category: 'Transit', totalJpy: 20000, percentage: 57 },
+      { category: 'Food', totalJpy: 15000, percentage: 43 },
+    ])
+    expect(view.cumulativeSpending).toEqual([
+      { date: '2026-04-06', actualJpy: 10000, expectedJpy: 20000 },
+      { date: '2026-04-07', actualJpy: 30000, expectedJpy: 40000 },
+      { date: '2026-04-08', actualJpy: 30000, expectedJpy: 60000 },
+      { date: '2026-04-09', actualJpy: 30000, expectedJpy: 80000 },
+      { date: '2026-04-10', actualJpy: 30000, expectedJpy: 100000 },
+    ])
   })
 })

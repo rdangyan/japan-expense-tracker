@@ -549,6 +549,234 @@ h3 {
   border-radius: 8px;
 }
 
+.dashboard-grid {
+  min-height: 0;
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+  flex: 1;
+  overflow: auto;
+}
+
+.dashboard-metrics {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.dashboard-metrics div,
+.dashboard-card {
+  min-width: 0;
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.dashboard-metrics div {
+  padding: 12px;
+  display: grid;
+  gap: 2px;
+}
+
+.dashboard-metrics dt,
+.chart-legend dt {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.dashboard-metrics dd,
+.chart-legend dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-strong);
+  font-weight: 800;
+}
+
+.dashboard-metrics dd span {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 680;
+}
+
+.dashboard-card {
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.dashboard-card-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.status-pill {
+  width: fit-content;
+  padding: 4px 9px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.status-pill[data-status='onTrack'] {
+  color: var(--status-good);
+  background: var(--status-good-soft);
+  border-color: var(--status-good-border);
+}
+
+.status-pill[data-status='caution'] {
+  color: var(--status-caution);
+  background: var(--status-caution-soft);
+  border-color: var(--status-caution-border);
+}
+
+.status-pill[data-status='overBudget'] {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+}
+
+.progress-track,
+.category-bar {
+  height: 10px;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.progress-track span,
+.category-bar span {
+  display: block;
+  block-size: 100%;
+  background: var(--accent);
+  border-radius: inherit;
+}
+
+.status-card p,
+.dashboard-note,
+.dashboard-empty-copy {
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
+.dashboard-note {
+  padding-top: 2px;
+  font-weight: 680;
+}
+
+.spending-chart {
+  display: grid;
+  gap: 10px;
+}
+
+.spending-chart svg {
+  width: 100%;
+  height: auto;
+  color: var(--border);
+  overflow: visible;
+}
+
+.spending-chart line {
+  stroke: currentColor;
+  stroke-width: 1.4;
+}
+
+.spending-chart polyline {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 4;
+}
+
+.expected-line {
+  stroke: var(--text-muted);
+  stroke-dasharray: 7 6;
+}
+
+.actual-line {
+  stroke: var(--accent);
+}
+
+.chart-legend {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.chart-legend div {
+  padding: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.category-breakdown-list,
+.dashboard-entry-list {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+  list-style: none;
+}
+
+.category-breakdown-list li {
+  display: grid;
+  gap: 8px;
+}
+
+.category-breakdown-list li > div:first-child {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.category-breakdown-list strong {
+  color: var(--text-strong);
+  font-size: 0.95rem;
+}
+
+.category-breakdown-list span {
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  font-weight: 720;
+  white-space: nowrap;
+}
+
+.category-breakdown-list li:nth-child(2n) .category-bar span {
+  background: var(--status-good);
+}
+
+.category-breakdown-list li:nth-child(3n) .category-bar span {
+  background: var(--status-caution);
+}
+
+.dashboard-entry-list li {
+  min-width: 0;
+  padding: 12px;
+  display: grid;
+  gap: 5px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.dashboard-entry-list strong {
+  color: var(--text-strong);
+  font-size: 1.04rem;
+  line-height: 1.15;
+}
+
 .entry-management {
   min-height: 0;
   padding: 18px;

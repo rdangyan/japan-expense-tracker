@@ -12,6 +12,7 @@ import {
   expenseCategories,
   formatHomeCurrency,
   formatJpy,
+  getDashboardAnalytics,
   getEntryListView,
   paymentMethodLabels,
   paymentMethods,
@@ -20,16 +21,16 @@ import {
   validateCashWithdrawalInput,
   validateExpenseInput,
   validateTripSetup,
-  calculateExpenseTotalJpy,
+  type BudgetStatus,
   type CashWithdrawalInput,
   type CashWithdrawalValidationErrors,
+  type DashboardAnalytics,
   type EntryCategoryFilter,
   type EntryPaymentMethodFilter,
   type EntrySortOrder,
   type EntryTypeFilter,
   type ExpenseInput,
   type ExpenseValidationErrors,
-  type ExpenseEntry,
   type TripEntry,
   type TripSettings,
   type TripSetupInput,
@@ -94,6 +95,10 @@ function App() {
   const currentTab = tabs.find((tab) => tab.id === activeTab) ?? tabs[0]
   const emptyState = emptyStates[activeTab]
   const hasEntries = entries.length > 0
+  const analytics = useMemo(
+    () => (trip ? getDashboardAnalytics(trip, entries) : null),
+    [entries, trip],
+  )
 
   useEffect(() => {
     let isMounted = true
@@ -155,9 +160,9 @@ function App() {
     )
   }
 
-  const budgetJpy = convertHomeToJpy(trip.totalBudgetHome, trip.exchangeRateJpy)
-  const totalSpentJpy = calculateExpenseTotalJpy(entries)
-  const remainingJpy = budgetJpy - totalSpentJpy
+  if (!analytics) {
+    return null
+  }
 
   return (
     <div className="app-shell">
@@ -205,20 +210,30 @@ function App() {
             <div>
               <dt>Spent</dt>
               <dd>
-                {formatJpy(totalSpentJpy)}
-                <span>{formatHomeCurrency(convertJpyToHome(totalSpentJpy, trip.exchangeRateJpy), trip.homeCurrency)}</span>
+                {formatJpy(analytics.totalSpentJpy)}
+                <span>
+                  {formatHomeCurrency(
+                    convertJpyToHome(analytics.totalSpentJpy, trip.exchangeRateJpy),
+                    trip.homeCurrency,
+                  )}
+                </span>
               </dd>
             </div>
             <div>
               <dt>Remaining</dt>
               <dd>
-                {formatJpy(remainingJpy)}
-                <span>{formatHomeCurrency(convertJpyToHome(remainingJpy, trip.exchangeRateJpy), trip.homeCurrency)}</span>
+                {formatJpy(analytics.remainingJpy)}
+                <span>
+                  {formatHomeCurrency(
+                    convertJpyToHome(analytics.remainingJpy, trip.exchangeRateJpy),
+                    trip.homeCurrency,
+                  )}
+                </span>
               </dd>
             </div>
             <div>
               <dt>JPY equivalent</dt>
-              <dd>{formatJpy(budgetJpy)}</dd>
+              <dd>{formatJpy(analytics.budgetJpy)}</dd>
             </div>
             <div>
               <dt>Trip dates</dt>
@@ -261,7 +276,9 @@ function App() {
             )}
           </div>
 
-          {activeTab === 'expenses' && hasEntries ? (
+          {activeTab === 'dashboard' ? (
+            <DashboardAnalyticsPanel analytics={analytics} trip={trip} />
+          ) : activeTab === 'expenses' && hasEntries ? (
             <EntryManagementList
               entries={entries}
               trip={trip}
@@ -302,9 +319,6 @@ function App() {
                     </dd>
                   </div>
                 </dl>
-              )}
-              {activeTab === 'dashboard' && hasEntries && (
-                <PopulatedEntryPreview entries={entries} trip={trip} view={activeTab} />
               )}
               {activeTab !== 'settings' && !hasEntries && (
                 <button
@@ -1375,62 +1389,214 @@ function DeleteEntryDialog({
   )
 }
 
-type PopulatedEntryPreviewProps = {
-  entries: TripEntry[]
+type DashboardAnalyticsPanelProps = {
+  analytics: DashboardAnalytics
   trip: TripSettings
-  view: Exclude<TabId, 'settings'>
 }
 
-function PopulatedEntryPreview({ entries, trip, view }: PopulatedEntryPreviewProps) {
-  const expenseEntries = entries.filter((entry): entry is ExpenseEntry => entry.type === 'expense')
-  const withdrawalCount = entries.length - expenseEntries.length
-  const totalSpentJpy = expenseEntries.reduce((total, entry) => total + entry.amountJpy, 0)
-  const recentEntries = [...entries]
-    .sort(
-      (first, second) =>
-        second.date.localeCompare(first.date) || second.createdAt.localeCompare(first.createdAt),
-    )
-    .slice(0, view === 'dashboard' ? 4 : 8)
+const budgetStatusLabels: Record<BudgetStatus, string> = {
+  onTrack: 'On track',
+  caution: 'Caution',
+  overBudget: 'Over budget',
+}
 
+function DashboardAnalyticsPanel({ analytics, trip }: DashboardAnalyticsPanelProps) {
   return (
-    <div className="entry-preview" aria-label="Loaded demo entry preview">
-      <dl className="entry-stats">
+    <div className="dashboard-grid">
+      <dl className="dashboard-metrics" aria-label="Dashboard budget metrics">
         <div>
-          <dt>Entries</dt>
-          <dd>{entries.length}</dd>
-        </div>
-        <div>
-          <dt>Expenses</dt>
-          <dd>{expenseEntries.length}</dd>
-        </div>
-        <div>
-          <dt>Withdrawals</dt>
-          <dd>{withdrawalCount}</dd>
-        </div>
-        <div>
-          <dt>Expense total</dt>
+          <dt>Total spent</dt>
           <dd>
-            {formatJpy(totalSpentJpy)}
-            <span>{formatHomeCurrency(totalSpentJpy / trip.exchangeRateJpy, trip.homeCurrency)}</span>
+            {formatJpy(analytics.totalSpentJpy)}
+            <span>
+              {formatHomeCurrency(
+                convertJpyToHome(analytics.totalSpentJpy, trip.exchangeRateJpy),
+                trip.homeCurrency,
+              )}
+            </span>
           </dd>
+        </div>
+        <div>
+          <dt>Remaining</dt>
+          <dd>
+            {formatJpy(analytics.remainingJpy)}
+            <span>
+              {formatHomeCurrency(
+                convertJpyToHome(analytics.remainingJpy, trip.exchangeRateJpy),
+                trip.homeCurrency,
+              )}
+            </span>
+          </dd>
+        </div>
+        <div>
+          <dt>Daily average</dt>
+          <dd>{formatJpy(analytics.dailyAverageJpy)}</dd>
+        </div>
+        <div>
+          <dt>Daily budget</dt>
+          <dd>{formatJpy(analytics.originalDailyBudgetJpy)}</dd>
+        </div>
+        <div>
+          <dt>Remaining daily</dt>
+          <dd>{formatJpy(analytics.currentRemainingDailyAllowanceJpy)}</dd>
+        </div>
+        <div>
+          <dt>Days left</dt>
+          <dd>{analytics.daysLeft}</dd>
         </div>
       </dl>
 
-      <ul className="entry-list">
-        {recentEntries.map((entry) => (
-          <li key={entry.id}>
-            <span className="entry-badge" data-entry-type={entry.type}>
-              {entry.type === 'expense' ? entry.category : 'Cash withdrawal'}
-            </span>
-            <span className="entry-note">
-              {entry.note || (entry.type === 'expense' ? `${entry.category} expense` : 'Cash withdrawal')}
-            </span>
-            <span className="entry-meta">
-              {formatDate(entry.date)} &middot; {formatJpy(entry.amountJpy)}
-            </span>
-          </li>
-        ))}
-      </ul>
+      <section className="dashboard-card status-card" aria-labelledby="budget-status-title">
+        <div className="dashboard-card-heading">
+          <div>
+            <p className="section-kicker">Budget status</p>
+            <h3 id="budget-status-title">{budgetStatusLabels[analytics.budgetStatus]}</h3>
+          </div>
+          <span className="status-pill" data-status={analytics.budgetStatus}>
+            {budgetStatusLabels[analytics.budgetStatus]}
+          </span>
+        </div>
+        <div
+          className="progress-track"
+          aria-label={`${analytics.tripProgressPercent}% of trip elapsed`}
+        >
+          <span style={{ inlineSize: `${analytics.tripProgressPercent}%` }} />
+        </div>
+        <p>
+          {analytics.daysElapsed} of {analytics.totalTripDays} trip days elapsed. Expected spend by
+          today is {formatJpy(analytics.expectedSpendToDateJpy)}; in-trip spending to date is{' '}
+          {formatJpy(analytics.inTripSpentToDateJpy)}.
+        </p>
+        {analytics.outsideTripExpenseTotalJpy > 0 && (
+          <p className="dashboard-note">
+            {formatJpy(analytics.outsideTripExpenseTotalJpy)} is outside trip dates and excluded
+            from pacing.
+          </p>
+        )}
+      </section>
+
+      <section className="dashboard-card chart-card" aria-labelledby="spending-chart-title">
+        <div className="dashboard-card-heading">
+          <div>
+            <p className="section-kicker">Cumulative spend</p>
+            <h3 id="spending-chart-title">Actual vs expected pace</h3>
+          </div>
+        </div>
+        <CumulativeSpendingChart analytics={analytics} />
+      </section>
+
+      <section className="dashboard-card" aria-labelledby="category-breakdown-title">
+        <div className="dashboard-card-heading">
+          <div>
+            <p className="section-kicker">Categories</p>
+            <h3 id="category-breakdown-title">Spending breakdown</h3>
+          </div>
+        </div>
+        {analytics.categoryBreakdown.length > 0 ? (
+          <ul className="category-breakdown-list">
+            {analytics.categoryBreakdown.map((category) => (
+              <li key={category.category}>
+                <div>
+                  <strong>{category.category}</strong>
+                  <span>
+                    {formatJpy(category.totalJpy)} · {category.percentage}%
+                  </span>
+                </div>
+                <div className="category-bar" aria-hidden="true">
+                  <span style={{ inlineSize: `${category.percentage}%` }} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="dashboard-empty-copy">Add an expense to see category totals.</p>
+        )}
+      </section>
+
+      <section className="dashboard-card" aria-labelledby="recent-activity-title">
+        <div className="dashboard-card-heading">
+          <div>
+            <p className="section-kicker">Recent activity</p>
+            <h3 id="recent-activity-title">Latest entries</h3>
+          </div>
+        </div>
+        {analytics.recentEntries.length > 0 ? (
+          <ul className="dashboard-entry-list">
+            {analytics.recentEntries.map((entry) => (
+              <li key={entry.id}>
+                <span className="entry-badge" data-entry-type={entry.type}>
+                  {entryTypeLabels[entry.type]}
+                </span>
+                <strong>{formatJpy(entry.amountJpy)}</strong>
+                <span className="entry-note">
+                  {entry.note ||
+                    (entry.type === 'expense' ? `${entry.category} expense` : 'Cash withdrawal')}
+                </span>
+                <span className="entry-meta">
+                  {formatDate(entry.date)}
+                  {entry.type === 'expense' && <> · {entry.category}</>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="dashboard-empty-copy">Add an expense or withdrawal to see recent activity.</p>
+        )}
+      </section>
+    </div>
+  )
+}
+
+function CumulativeSpendingChart({ analytics }: { analytics: DashboardAnalytics }) {
+  const width = 320
+  const height = 150
+  const padding = 18
+  const maxY = Math.max(
+    analytics.budgetJpy,
+    ...analytics.cumulativeSpending.map((point) => Math.max(point.actualJpy, point.expectedJpy)),
+    1,
+  )
+  const actualPoints = getChartPoints(
+    analytics.cumulativeSpending,
+    'actualJpy',
+    width,
+    height,
+    padding,
+    maxY,
+  )
+  const expectedPoints = getChartPoints(
+    analytics.cumulativeSpending,
+    'expectedJpy',
+    width,
+    height,
+    padding,
+    maxY,
+  )
+  const lastPoint = analytics.cumulativeSpending.at(-1)
+
+  return (
+    <div className="spending-chart">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-labelledby="chart-title chart-desc">
+        <title id="chart-title">Cumulative spending chart</title>
+        <desc id="chart-desc">
+          Actual spending is {formatJpy(lastPoint?.actualJpy ?? 0)} and expected trip pace is{' '}
+          {formatJpy(lastPoint?.expectedJpy ?? 0)}.
+        </desc>
+        <line x1={padding} x2={padding} y1={padding} y2={height - padding} />
+        <line x1={padding} x2={width - padding} y1={height - padding} y2={height - padding} />
+        <polyline className="expected-line" points={expectedPoints} />
+        <polyline className="actual-line" points={actualPoints} />
+      </svg>
+      <dl className="chart-legend">
+        <div>
+          <dt>Actual</dt>
+          <dd>{formatJpy(lastPoint?.actualJpy ?? 0)}</dd>
+        </div>
+        <div>
+          <dt>Expected</dt>
+          <dd>{formatJpy(lastPoint?.expectedJpy ?? 0)}</dd>
+        </div>
+      </dl>
     </div>
   )
 }
@@ -1516,6 +1682,32 @@ function upsertEntry(entries: TripEntry[], nextEntry: TripEntry): TripEntry[] {
   }
 
   return entries.map((entry, index) => (index === existingIndex ? nextEntry : entry))
+}
+
+function getChartPoints(
+  points: DashboardAnalytics['cumulativeSpending'],
+  key: 'actualJpy' | 'expectedJpy',
+  width: number,
+  height: number,
+  padding: number,
+  maxY: number,
+): string {
+  const drawableWidth = width - padding * 2
+  const drawableHeight = height - padding * 2
+  const denominator = Math.max(points.length - 1, 1)
+
+  return points
+    .map((point, index) => {
+      const x = padding + (drawableWidth * index) / denominator
+      const y = height - padding - (drawableHeight * point[key]) / maxY
+
+      return `${roundChartCoordinate(x)},${roundChartCoordinate(y)}`
+    })
+    .join(' ')
+}
+
+function roundChartCoordinate(value: number): number {
+  return Math.round(value * 10) / 10
 }
 
 function formatDate(value: string): string {

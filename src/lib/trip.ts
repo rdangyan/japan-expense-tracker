@@ -112,6 +112,40 @@ export type EntryListView = {
   contextualTotalLabel: 'Spending total' | 'Withdrawal total'
 }
 
+export type BudgetStatus = 'onTrack' | 'caution' | 'overBudget'
+
+export type CategoryBreakdown = {
+  category: ExpenseCategory
+  totalJpy: number
+  percentage: number
+}
+
+export type CumulativeSpendingPoint = {
+  date: string
+  actualJpy: number
+  expectedJpy: number
+}
+
+export type DashboardAnalytics = {
+  budgetJpy: number
+  totalSpentJpy: number
+  remainingJpy: number
+  dailyAverageJpy: number
+  originalDailyBudgetJpy: number
+  currentRemainingDailyAllowanceJpy: number
+  daysElapsed: number
+  daysLeft: number
+  totalTripDays: number
+  tripProgressPercent: number
+  budgetStatus: BudgetStatus
+  expectedSpendToDateJpy: number
+  inTripSpentToDateJpy: number
+  outsideTripExpenseTotalJpy: number
+  categoryBreakdown: CategoryBreakdown[]
+  cumulativeSpending: CumulativeSpendingPoint[]
+  recentEntries: TripEntry[]
+}
+
 export type ExpenseInput = {
   amountJpy: string
   category: string
@@ -442,6 +476,54 @@ export function getEntryListView(
   }
 }
 
+export function getDashboardAnalytics(
+  trip: TripSettings,
+  entries: TripEntry[],
+  now = new Date(),
+): DashboardAnalytics {
+  const budgetJpy = convertHomeToJpy(trip.totalBudgetHome, trip.exchangeRateJpy)
+  const totalSpentJpy = calculateExpenseTotalJpy(entries)
+  const remainingJpy = budgetJpy - totalSpentJpy
+  const totalTripDays = getInclusiveDateSpan(trip.startDate, trip.endDate)
+  const japanToday = getJapanDateString(now)
+  const daysElapsed = getDaysElapsed(trip, japanToday)
+  const daysLeft = totalTripDays - daysElapsed
+  const originalDailyBudgetJpy = roundWholeYen(budgetJpy / totalTripDays)
+  const inTripExpensesToDate = getInTripExpenses(entries, trip).filter(
+    (entry) => entry.date <= japanToday,
+  )
+  const inTripSpentToDateJpy = calculateExpenseTotalJpy(inTripExpensesToDate)
+  const expectedSpendToDateJpy = roundWholeYen(originalDailyBudgetJpy * daysElapsed)
+  const dailyAverageJpy =
+    daysElapsed > 0 ? roundWholeYen(inTripSpentToDateJpy / daysElapsed) : 0
+  const currentRemainingDailyAllowanceJpy =
+    daysLeft > 0 ? roundWholeYen(remainingJpy / daysLeft) : remainingJpy
+  const expenseEntries = entries.filter((entry): entry is ExpenseEntry => entry.type === 'expense')
+  const outsideTripExpenseTotalJpy = calculateExpenseTotalJpy(
+    expenseEntries.filter((entry) => !isEntryWithinTrip(entry, trip)),
+  )
+
+  return {
+    budgetJpy,
+    totalSpentJpy,
+    remainingJpy,
+    dailyAverageJpy,
+    originalDailyBudgetJpy,
+    currentRemainingDailyAllowanceJpy,
+    daysElapsed,
+    daysLeft,
+    totalTripDays,
+    tripProgressPercent: totalTripDays > 0 ? roundPercent(daysElapsed / totalTripDays) : 0,
+    budgetStatus: getBudgetStatus(inTripSpentToDateJpy, expectedSpendToDateJpy),
+    expectedSpendToDateJpy,
+    inTripSpentToDateJpy,
+    outsideTripExpenseTotalJpy,
+    categoryBreakdown: getCategoryBreakdown(expenseEntries),
+    cumulativeSpending: getCumulativeSpending(trip, entries, originalDailyBudgetJpy, budgetJpy),
+    recentEntries: getRecentEntries(entries, 5),
+  }
+}
+
 export function convertHomeToJpy(amountHome: number, exchangeRateJpy: number): number {
   return Math.round(amountHome * exchangeRateJpy)
 }
@@ -473,6 +555,150 @@ function isValidIsoDate(value: string): boolean {
 
 function roundCurrency(amount: number): number {
   return Math.round((amount + Number.EPSILON) * 100) / 100
+}
+
+function roundWholeYen(amount: number): number {
+  return Math.round(amount)
+}
+
+function roundPercent(value: number): number {
+  return Math.min(100, Math.max(0, Math.round(value * 100)))
+}
+
+function getJapanDateString(date: Date): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    day: '2-digit',
+    month: '2-digit',
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+  }).formatToParts(date)
+  const partMap = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+
+  return `${partMap.year}-${partMap.month}-${partMap.day}`
+}
+
+function getDaysElapsed(trip: TripSettings, today: string): number {
+  if (today < trip.startDate) {
+    return 0
+  }
+
+  if (today > trip.endDate) {
+    return getInclusiveDateSpan(trip.startDate, trip.endDate)
+  }
+
+  return getInclusiveDateSpan(trip.startDate, today)
+}
+
+function getInclusiveDateSpan(startDate: string, endDate: string): number {
+  const start = getUtcDateMs(startDate)
+  const end = getUtcDateMs(endDate)
+  const millisecondsPerDay = 24 * 60 * 60 * 1000
+
+  return Math.max(1, Math.round((end - start) / millisecondsPerDay) + 1)
+}
+
+function getUtcDateMs(value: string): number {
+  return new Date(`${value}T00:00:00.000Z`).getTime()
+}
+
+function isEntryWithinTrip(entry: TripEntry, trip: TripSettings): boolean {
+  return entry.date >= trip.startDate && entry.date <= trip.endDate
+}
+
+function getInTripExpenses(entries: TripEntry[], trip: TripSettings): ExpenseEntry[] {
+  return entries.filter(
+    (entry): entry is ExpenseEntry => entry.type === 'expense' && isEntryWithinTrip(entry, trip),
+  )
+}
+
+function getBudgetStatus(actualJpy: number, expectedJpy: number): BudgetStatus {
+  if (expectedJpy <= 0) {
+    return actualJpy > 0 ? 'overBudget' : 'onTrack'
+  }
+
+  const ratio = actualJpy / expectedJpy
+
+  if (ratio < 0.9) {
+    return 'onTrack'
+  }
+
+  if (ratio <= 1.1) {
+    return 'caution'
+  }
+
+  return 'overBudget'
+}
+
+function getCategoryBreakdown(expenseEntries: ExpenseEntry[]): CategoryBreakdown[] {
+  const totalSpentJpy = calculateExpenseTotalJpy(expenseEntries)
+
+  return expenseCategories
+    .map((category) => {
+      const totalJpy = expenseEntries.reduce(
+        (total, entry) => (entry.category === category ? total + entry.amountJpy : total),
+        0,
+      )
+
+      return {
+        category,
+        totalJpy,
+        percentage: totalSpentJpy > 0 ? roundPercent(totalJpy / totalSpentJpy) : 0,
+      }
+    })
+    .filter((breakdown) => breakdown.totalJpy > 0)
+    .sort(
+      (first, second) =>
+        second.totalJpy - first.totalJpy || first.category.localeCompare(second.category),
+    )
+}
+
+function getCumulativeSpending(
+  trip: TripSettings,
+  entries: TripEntry[],
+  originalDailyBudgetJpy: number,
+  budgetJpy: number,
+): CumulativeSpendingPoint[] {
+  const inTripExpenses = getInTripExpenses(entries, trip)
+  const points: CumulativeSpendingPoint[] = []
+  let runningActualJpy = 0
+
+  for (const date of eachDateInRange(trip.startDate, trip.endDate)) {
+    runningActualJpy += inTripExpenses.reduce(
+      (total, entry) => (entry.date === date ? total + entry.amountJpy : total),
+      0,
+    )
+
+    points.push({
+      date,
+      actualJpy: runningActualJpy,
+      expectedJpy: Math.min(budgetJpy, originalDailyBudgetJpy * (points.length + 1)),
+    })
+  }
+
+  return points
+}
+
+function eachDateInRange(startDate: string, endDate: string): string[] {
+  const dates: string[] = []
+  const current = new Date(`${startDate}T00:00:00.000Z`)
+  const end = new Date(`${endDate}T00:00:00.000Z`)
+
+  while (current <= end) {
+    dates.push(current.toISOString().slice(0, 10))
+    current.setUTCDate(current.getUTCDate() + 1)
+  }
+
+  return dates
+}
+
+function getRecentEntries(entries: TripEntry[], limit: number): TripEntry[] {
+  return [...entries]
+    .sort(
+      (first, second) =>
+        compareEntriesByDateThenCreated(second, first) ||
+        second.updatedAt.localeCompare(first.updatedAt),
+    )
+    .slice(0, limit)
 }
 
 function isKnownExpenseCategory(category: string): category is ExpenseCategory {
