@@ -8,11 +8,14 @@ import {
   formatHomeCurrency,
   formatJpy,
   validateTripSetup,
+  type ExpenseEntry,
+  type TripEntry,
   type TripSettings,
   type TripSetupInput,
   type TripValidationErrors,
 } from './lib/trip'
-import { getActiveTrip, saveActiveTrip } from './lib/tripStore'
+import { createDemoTrip } from './lib/demoTrip'
+import { getActiveTrip, getEntriesForTrip, saveActiveTrip, saveTripSnapshot } from './lib/tripStore'
 
 type TabId = 'dashboard' | 'expenses' | 'settings'
 
@@ -52,6 +55,7 @@ const emptyStates = {
 function App() {
   const [activeTab, setActiveTab] = useState<TabId>('dashboard')
   const [trip, setTrip] = useState<TripSettings | null>(null)
+  const [entries, setEntries] = useState<TripEntry[]>([])
   const [isLoadingTrip, setIsLoadingTrip] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const currentTab = tabs.find((tab) => tab.id === activeTab) ?? tabs[0]
@@ -64,6 +68,17 @@ function App() {
       .then((activeTrip) => {
         if (isMounted) {
           setTrip(activeTrip)
+        }
+
+        if (!activeTrip) {
+          return []
+        }
+
+        return getEntriesForTrip(activeTrip.tripId)
+      })
+      .then((loadedEntries) => {
+        if (isMounted) {
+          setEntries(loadedEntries)
         }
       })
       .catch(() => {
@@ -95,7 +110,15 @@ function App() {
   }
 
   if (!trip) {
-    return <TripSetupScreen loadError={loadError} onTripCreated={setTrip} />
+    return (
+      <TripSetupScreen
+        loadError={loadError}
+        onTripCreated={(nextTrip, nextEntries = []) => {
+          setTrip(nextTrip)
+          setEntries(nextEntries)
+        }}
+      />
+    )
   }
 
   const budgetJpy = convertHomeToJpy(trip.totalBudgetHome, trip.exchangeRateJpy)
@@ -207,6 +230,9 @@ function App() {
                 </div>
               </dl>
             )}
+            {activeTab !== 'settings' && entries.length > 0 && (
+              <PopulatedEntryPreview entries={entries} trip={trip} view={activeTab} />
+            )}
             <button className="secondary-action" type="button" disabled>
               {emptyState.action}
             </button>
@@ -240,7 +266,7 @@ function App() {
 
 type TripSetupScreenProps = {
   loadError: string | null
-  onTripCreated: (trip: TripSettings) => void
+  onTripCreated: (trip: TripSettings, entries?: TripEntry[]) => void
 }
 
 const initialTripSetup: TripSetupInput = {
@@ -257,6 +283,7 @@ function TripSetupScreen({ loadError, onTripCreated }: TripSetupScreenProps) {
   const [touched, setTouched] = useState<Partial<Record<keyof TripSetupInput, boolean>>>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
+  const [isLoadingDemo, setIsLoadingDemo] = useState(false)
   const validation = useMemo(() => validateTripSetup(form), [form])
   const visibleErrors = getVisibleErrors(validation.errors, touched)
   const customCurrency = !currencyPresets.includes(form.homeCurrency as (typeof currencyPresets)[number])
@@ -301,6 +328,27 @@ function TripSetupScreen({ loadError, onTripCreated }: TripSetupScreenProps) {
         setSubmitError('Trip setup could not be saved in this browser.')
       })
       .finally(() => setIsSaving(false))
+  }
+
+  function handleLoadDemoTrip() {
+    const shouldLoadDemo = window.confirm(
+      'Load the Japan Spring Trip demo into this browser? This will replace the current local trip data.',
+    )
+
+    if (!shouldLoadDemo) {
+      return
+    }
+
+    const demoTrip = createDemoTrip()
+    setIsLoadingDemo(true)
+    setSubmitError(null)
+
+    saveTripSnapshot(demoTrip.trip, demoTrip.entries)
+      .then(() => onTripCreated(demoTrip.trip, demoTrip.entries))
+      .catch(() => {
+        setSubmitError('Demo trip could not be saved in this browser.')
+      })
+      .finally(() => setIsLoadingDemo(false))
   }
 
   return (
@@ -452,9 +500,82 @@ function TripSetupScreen({ loadError, onTripCreated }: TripSetupScreenProps) {
           <button className="setup-submit" type="submit" disabled={!validation.isValid || isSaving}>
             {isSaving ? 'Saving trip...' : 'Create trip'}
           </button>
+
+          <div className="demo-load-panel">
+            <div>
+              <strong>Reviewer shortcut</strong>
+              <span>Load a deterministic Japan Spring Trip with realistic local entries.</span>
+            </div>
+            <button
+              className="demo-load-button"
+              type="button"
+              disabled={isSaving || isLoadingDemo}
+              onClick={handleLoadDemoTrip}
+            >
+              {isLoadingDemo ? 'Loading demo...' : 'Load demo trip'}
+            </button>
+          </div>
         </form>
       </section>
     </main>
+  )
+}
+
+type PopulatedEntryPreviewProps = {
+  entries: TripEntry[]
+  trip: TripSettings
+  view: Exclude<TabId, 'settings'>
+}
+
+function PopulatedEntryPreview({ entries, trip, view }: PopulatedEntryPreviewProps) {
+  const expenseEntries = entries.filter((entry): entry is ExpenseEntry => entry.type === 'expense')
+  const withdrawalCount = entries.length - expenseEntries.length
+  const totalSpentJpy = expenseEntries.reduce((total, entry) => total + entry.amountJpy, 0)
+  const recentEntries = [...entries]
+    .sort(
+      (first, second) =>
+        second.date.localeCompare(first.date) || second.createdAt.localeCompare(first.createdAt),
+    )
+    .slice(0, view === 'dashboard' ? 4 : 8)
+
+  return (
+    <div className="entry-preview" aria-label="Loaded demo entry preview">
+      <dl className="entry-stats">
+        <div>
+          <dt>Entries</dt>
+          <dd>{entries.length}</dd>
+        </div>
+        <div>
+          <dt>Expenses</dt>
+          <dd>{expenseEntries.length}</dd>
+        </div>
+        <div>
+          <dt>Withdrawals</dt>
+          <dd>{withdrawalCount}</dd>
+        </div>
+        <div>
+          <dt>Expense total</dt>
+          <dd>
+            {formatJpy(totalSpentJpy)}
+            <span>{formatHomeCurrency(totalSpentJpy / trip.exchangeRateJpy, trip.homeCurrency)}</span>
+          </dd>
+        </div>
+      </dl>
+
+      <ul className="entry-list">
+        {recentEntries.map((entry) => (
+          <li key={entry.id}>
+            <span className="entry-badge" data-entry-type={entry.type}>
+              {entry.type === 'expense' ? entry.category : 'Cash withdrawal'}
+            </span>
+            <span className="entry-note">{entry.note}</span>
+            <span className="entry-meta">
+              {formatDate(entry.date)} &middot; {formatJpy(entry.amountJpy)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
 

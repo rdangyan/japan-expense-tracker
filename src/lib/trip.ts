@@ -33,6 +33,44 @@ export type TripValidationResult = {
   errors: TripValidationErrors
 }
 
+export const expenseCategories = [
+  'Food',
+  'Transit',
+  'Lodging',
+  'Shopping',
+  'Attractions',
+  'Convenience stores',
+  'Other',
+] as const
+
+export const paymentMethods = ['cash', 'card', 'icCard', 'other'] as const
+
+export type ExpenseCategory = (typeof expenseCategories)[number]
+
+export type PaymentMethod = (typeof paymentMethods)[number]
+
+export type BaseTripEntry = {
+  id: string
+  tripId: string
+  date: string
+  amountJpy: number
+  note?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type ExpenseEntry = BaseTripEntry & {
+  type: 'expense'
+  category: ExpenseCategory
+  paymentMethod?: PaymentMethod
+}
+
+export type CashWithdrawalEntry = BaseTripEntry & {
+  type: 'cashWithdrawal'
+}
+
+export type TripEntry = ExpenseEntry | CashWithdrawalEntry
+
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/
 const currencyPattern = /^[A-Z]{3}$/
 
