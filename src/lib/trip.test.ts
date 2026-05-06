@@ -3,12 +3,15 @@ import {
   convertHomeToJpy,
   convertJpyToHome,
   calculateExpenseTotalJpy,
+  createCashWithdrawalEntry,
   createExpenseEntry,
   createTripSettings,
   formatHomeCurrency,
   formatJpy,
+  validateCashWithdrawalInput,
   validateExpenseInput,
   validateTripSetup,
+  type CashWithdrawalInput,
   type ExpenseInput,
   type TripSetupInput,
 } from './trip'
@@ -104,6 +107,12 @@ const validExpenseInput: ExpenseInput = {
   note: 'Ameyoko ramen',
 }
 
+const validWithdrawalInput: CashWithdrawalInput = {
+  amountJpy: '10000',
+  date: '2026-04-07',
+  note: '7-Bank ATM Shinjuku',
+}
+
 describe('expense validation', () => {
   it('accepts a valid whole-yen expense', () => {
     expect(validateExpenseInput(validExpenseInput)).toEqual({
@@ -129,6 +138,37 @@ describe('expense validation', () => {
   it('limits notes to one line and 80 characters', () => {
     const result = validateExpenseInput({
       ...validExpenseInput,
+      note: `${'a'.repeat(81)}\nextra`,
+    })
+
+    expect(result.isValid).toBe(false)
+    expect(result.errors.note).toBe('Keep the note to one line.')
+  })
+})
+
+describe('cash withdrawal validation', () => {
+  it('accepts a valid whole-yen withdrawal', () => {
+    expect(validateCashWithdrawalInput(validWithdrawalInput)).toEqual({
+      isValid: true,
+      errors: {},
+    })
+  })
+
+  it('requires whole-yen amount and valid date', () => {
+    const result = validateCashWithdrawalInput({
+      ...validWithdrawalInput,
+      amountJpy: '12.5',
+      date: '2026-02-31',
+    })
+
+    expect(result.isValid).toBe(false)
+    expect(result.errors.amountJpy).toBe('Enter a whole-yen amount greater than 0.')
+    expect(result.errors.date).toBe('Choose a valid date.')
+  })
+
+  it('limits withdrawal notes to one line and 80 characters', () => {
+    const result = validateCashWithdrawalInput({
+      ...validWithdrawalInput,
       note: `${'a'.repeat(81)}\nextra`,
     })
 
@@ -166,21 +206,40 @@ describe('expense entries', () => {
     vi.unstubAllGlobals()
   })
 
+  it('creates a persisted cash withdrawal shape with stable timestamps', () => {
+    vi.stubGlobal('crypto', { randomUUID: () => 'withdrawal-123' })
+
+    const entry = createCashWithdrawalEntry(
+      'trip-123',
+      {
+        ...validWithdrawalInput,
+        note: '  7-Bank ATM Shinjuku  ',
+      },
+      new Date('2026-04-07T01:02:03.000Z'),
+    )
+
+    expect(entry).toEqual({
+      id: 'withdrawal-123',
+      tripId: 'trip-123',
+      type: 'cashWithdrawal',
+      date: '2026-04-07',
+      amountJpy: 10000,
+      note: '7-Bank ATM Shinjuku',
+      createdAt: '2026-04-07T01:02:03.000Z',
+      updatedAt: '2026-04-07T01:02:03.000Z',
+    })
+
+    vi.unstubAllGlobals()
+  })
+
   it('calculates spending totals from expenses only', () => {
     const expense = createExpenseEntry('trip-123', validExpenseInput)
+    const withdrawal = createCashWithdrawalEntry('trip-123', validWithdrawalInput)
 
     expect(
       calculateExpenseTotalJpy([
         expense,
-        {
-          id: 'withdrawal-123',
-          tripId: 'trip-123',
-          type: 'cashWithdrawal',
-          date: '2026-04-07',
-          amountJpy: 10000,
-          createdAt: '2026-04-07T00:00:00.000Z',
-          updatedAt: '2026-04-07T00:00:00.000Z',
-        },
+        withdrawal,
       ]),
     ).toBe(1480)
   })

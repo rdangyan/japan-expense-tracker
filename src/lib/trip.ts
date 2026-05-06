@@ -86,6 +86,19 @@ export type ExpenseValidationResult = {
   errors: ExpenseValidationErrors
 }
 
+export type CashWithdrawalInput = {
+  amountJpy: string
+  date: string
+  note: string
+}
+
+export type CashWithdrawalValidationErrors = Partial<Record<keyof CashWithdrawalInput, string>>
+
+export type CashWithdrawalValidationResult = {
+  isValid: boolean
+  errors: CashWithdrawalValidationErrors
+}
+
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/
 const currencyPattern = /^[A-Z]{3}$/
 
@@ -210,6 +223,59 @@ export function createExpenseEntry(
   if (input.paymentMethod) {
     entry.paymentMethod = input.paymentMethod as PaymentMethod
   }
+
+  if (note) {
+    entry.note = note
+  }
+
+  return entry
+}
+
+export function validateCashWithdrawalInput(
+  input: CashWithdrawalInput,
+): CashWithdrawalValidationResult {
+  const errors: CashWithdrawalValidationErrors = {}
+  const amountJpy = Number(input.amountJpy)
+  const note = input.note.trim()
+
+  if (!Number.isInteger(amountJpy) || amountJpy <= 0) {
+    errors.amountJpy = 'Enter a whole-yen amount greater than 0.'
+  }
+
+  if (!isValidIsoDate(input.date)) {
+    errors.date = 'Choose a valid date.'
+  }
+
+  if (note.length > 80) {
+    errors.note = 'Keep the note to 80 characters or fewer.'
+  }
+
+  if (/[\r\n]/.test(input.note)) {
+    errors.note = 'Keep the note to one line.'
+  }
+
+  return {
+    isValid: Object.keys(errors).length === 0,
+    errors,
+  }
+}
+
+export function createCashWithdrawalEntry(
+  tripId: string,
+  input: CashWithdrawalInput,
+  now = new Date(),
+): CashWithdrawalEntry {
+  const timestamp = now.toISOString()
+  const entry: CashWithdrawalEntry = {
+    id: createStableId('withdrawal'),
+    tripId,
+    type: 'cashWithdrawal',
+    date: input.date,
+    amountJpy: Number(input.amountJpy),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }
+  const note = input.note.trim()
 
   if (note) {
     entry.note = note

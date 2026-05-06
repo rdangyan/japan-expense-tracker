@@ -4,6 +4,7 @@ import './App.css'
 import {
   convertHomeToJpy,
   convertJpyToHome,
+  createCashWithdrawalEntry,
   createExpenseEntry,
   createTripSettings,
   currencyPresets,
@@ -11,9 +12,12 @@ import {
   formatHomeCurrency,
   formatJpy,
   paymentMethods,
+  validateCashWithdrawalInput,
   validateExpenseInput,
   validateTripSetup,
   calculateExpenseTotalJpy,
+  type CashWithdrawalInput,
+  type CashWithdrawalValidationErrors,
   type ExpenseInput,
   type ExpenseValidationErrors,
   type ExpenseEntry,
@@ -585,7 +589,7 @@ type ExpenseBottomSheetProps = {
   isOpen: boolean
   trip: TripSettings
   onClose: () => void
-  onSaved: (entry: ExpenseEntry) => void
+  onSaved: (entry: TripEntry) => void
 }
 
 const blankExpenseForm: ExpenseInput = {
@@ -596,6 +600,12 @@ const blankExpenseForm: ExpenseInput = {
   note: '',
 }
 
+const blankCashWithdrawalForm: CashWithdrawalInput = {
+  amountJpy: '',
+  date: '',
+  note: '',
+}
+
 const paymentMethodLabels: Record<PaymentMethod, string> = {
   cash: 'Cash',
   card: 'Card',
@@ -603,25 +613,49 @@ const paymentMethodLabels: Record<PaymentMethod, string> = {
   other: 'Other',
 }
 
+type AddEntryType = 'expense' | 'cashWithdrawal'
+
 function ExpenseBottomSheet({ isOpen, trip, onClose, onSaved }: ExpenseBottomSheetProps) {
+  const [entryType, setEntryType] = useState<AddEntryType>('expense')
   const [form, setForm] = useState<ExpenseInput>(() => ({
     ...blankExpenseForm,
     date: trip.startDate,
   }))
+  const [withdrawalForm, setWithdrawalForm] = useState<CashWithdrawalInput>(() => ({
+    ...blankCashWithdrawalForm,
+    date: trip.startDate,
+  }))
   const [touched, setTouched] = useState<Partial<Record<keyof ExpenseInput, boolean>>>({})
+  const [withdrawalTouched, setWithdrawalTouched] = useState<
+    Partial<Record<keyof CashWithdrawalInput, boolean>>
+  >({})
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
-  const validation = useMemo(() => validateExpenseInput(form), [form])
-  const visibleErrors = getVisibleExpenseErrors(validation.errors, touched)
+  const expenseValidation = useMemo(() => validateExpenseInput(form), [form])
+  const withdrawalValidation = useMemo(
+    () => validateCashWithdrawalInput(withdrawalForm),
+    [withdrawalForm],
+  )
+  const visibleErrors = getVisibleExpenseErrors(expenseValidation.errors, touched)
+  const visibleWithdrawalErrors = getVisibleCashWithdrawalErrors(
+    withdrawalValidation.errors,
+    withdrawalTouched,
+  )
+  const activeAmountJpy = entryType === 'expense' ? form.amountJpy : withdrawalForm.amountJpy
+  const activeValidation =
+    entryType === 'expense' ? expenseValidation : withdrawalValidation
   const convertedAmount =
-    Number(form.amountJpy) > 0
-      ? formatHomeCurrency(convertJpyToHome(Number(form.amountJpy), trip.exchangeRateJpy), trip.homeCurrency)
+    Number(activeAmountJpy) > 0
+      ? formatHomeCurrency(convertJpyToHome(Number(activeAmountJpy), trip.exchangeRateJpy), trip.homeCurrency)
       : formatHomeCurrency(0, trip.homeCurrency)
 
   useEffect(() => {
     if (isOpen) {
+      setEntryType('expense')
       setForm({ ...blankExpenseForm, date: trip.startDate })
+      setWithdrawalForm({ ...blankCashWithdrawalForm, date: trip.startDate })
       setTouched({})
+      setWithdrawalTouched({})
       setSubmitError(null)
     }
   }, [isOpen, trip.startDate])
@@ -637,33 +671,66 @@ function ExpenseBottomSheet({ isOpen, trip, onClose, onSaved }: ExpenseBottomShe
     }))
   }
 
+  function updateWithdrawalField(name: keyof CashWithdrawalInput, value: string) {
+    setWithdrawalForm((current) => ({
+      ...current,
+      [name]: name === 'note' ? value.replace(/[\r\n]/g, ' ').slice(0, 80) : value,
+    }))
+  }
+
   function markTouched(name: keyof ExpenseInput) {
     setTouched((current) => ({ ...current, [name]: true }))
   }
 
+  function markWithdrawalTouched(name: keyof CashWithdrawalInput) {
+    setWithdrawalTouched((current) => ({ ...current, [name]: true }))
+  }
+
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setTouched({
-      amountJpy: true,
-      category: true,
-      date: true,
-      paymentMethod: true,
-      note: true,
-    })
 
-    if (!validation.isValid) {
+    if (entryType === 'expense') {
+      setTouched({
+        amountJpy: true,
+        category: true,
+        date: true,
+        paymentMethod: true,
+        note: true,
+      })
+
+      if (!expenseValidation.isValid) {
+        return
+      }
+
+      saveEntry(createExpenseEntry(trip.tripId, form))
       return
     }
 
-    const entry = createExpenseEntry(trip.tripId, form)
+    setWithdrawalTouched({
+      amountJpy: true,
+      date: true,
+      note: true,
+    })
+
+    if (!withdrawalValidation.isValid) {
+      return
+    }
+
+    saveEntry(createCashWithdrawalEntry(trip.tripId, withdrawalForm))
+  }
+
+  function saveEntry(entry: TripEntry) {
     setIsSaving(true)
     setSubmitError(null)
 
     saveTripEntry(entry)
       .then(() => onSaved(entry))
-      .catch(() => setSubmitError('Expense could not be saved in this browser.'))
+      .catch(() => setSubmitError('Entry could not be saved in this browser.'))
       .finally(() => setIsSaving(false))
   }
+
+  const sheetTitle = entryType === 'expense' ? 'New expense' : 'New cash withdrawal'
+  const amountLabel = entryType === 'expense' ? 'Amount (JPY)' : 'Withdrawal amount (JPY)'
 
   return (
     <div className="sheet-layer" role="presentation">
@@ -678,7 +745,7 @@ function ExpenseBottomSheet({ isOpen, trip, onClose, onSaved }: ExpenseBottomShe
         <div className="sheet-header">
           <div>
             <p className="section-kicker">Add entry</p>
-            <h2 id="expense-sheet-title">New expense</h2>
+            <h2 id="expense-sheet-title">{sheetTitle}</h2>
           </div>
           <button className="icon-button" type="button" aria-label="Close add expense form" onClick={onClose}>
             <CloseIcon />
@@ -686,10 +753,18 @@ function ExpenseBottomSheet({ isOpen, trip, onClose, onSaved }: ExpenseBottomShe
         </div>
 
         <div className="entry-type-control" aria-label="Entry type">
-          <button type="button" data-active="true">
+          <button
+            type="button"
+            data-active={entryType === 'expense'}
+            onClick={() => setEntryType('expense')}
+          >
             Expense
           </button>
-          <button type="button" disabled>
+          <button
+            type="button"
+            data-active={entryType === 'cashWithdrawal'}
+            onClick={() => setEntryType('cashWithdrawal')}
+          >
             Cash withdrawal
           </button>
         </div>
@@ -701,7 +776,13 @@ function ExpenseBottomSheet({ isOpen, trip, onClose, onSaved }: ExpenseBottomShe
             </p>
           )}
 
-          <ExpenseField error={visibleErrors.amountJpy} label="Amount (JPY)" name="amountJpy">
+          <EntryField
+            error={
+              entryType === 'expense' ? visibleErrors.amountJpy : visibleWithdrawalErrors.amountJpy
+            }
+            label={amountLabel}
+            name="amountJpy"
+          >
             <input
               id="amountJpy"
               name="amountJpy"
@@ -709,78 +790,114 @@ function ExpenseBottomSheet({ isOpen, trip, onClose, onSaved }: ExpenseBottomShe
               min="1"
               step="1"
               inputMode="numeric"
-              value={form.amountJpy}
-              onBlur={() => markTouched('amountJpy')}
-              onChange={(event) => updateField('amountJpy', event.target.value)}
+              value={entryType === 'expense' ? form.amountJpy : withdrawalForm.amountJpy}
+              onBlur={() =>
+                entryType === 'expense'
+                  ? markTouched('amountJpy')
+                  : markWithdrawalTouched('amountJpy')
+              }
+              onChange={(event) =>
+                entryType === 'expense'
+                  ? updateField('amountJpy', event.target.value)
+                  : updateWithdrawalField('amountJpy', event.target.value)
+              }
             />
-          </ExpenseField>
+          </EntryField>
 
-          <ExpenseField error={visibleErrors.category} label="Category" name="category">
-            <select
-              id="category"
-              name="category"
-              value={form.category}
-              onBlur={() => markTouched('category')}
-              onChange={(event) => updateField('category', event.target.value)}
-            >
-              <option value="">Choose category</option>
-              {expenseCategories.map((category) => (
-                <option key={category} value={category}>
-                  {category}
-                </option>
-              ))}
-            </select>
-          </ExpenseField>
+          {entryType === 'expense' && (
+            <EntryField error={visibleErrors.category} label="Category" name="category">
+              <select
+                id="category"
+                name="category"
+                value={form.category}
+                onBlur={() => markTouched('category')}
+                onChange={(event) => updateField('category', event.target.value)}
+              >
+                <option value="">Choose category</option>
+                {expenseCategories.map((category) => (
+                  <option key={category} value={category}>
+                    {category}
+                  </option>
+                ))}
+              </select>
+            </EntryField>
+          )}
 
           <div className="form-grid">
-            <ExpenseField error={visibleErrors.date} label="Date" name="date">
+            <EntryField
+              error={entryType === 'expense' ? visibleErrors.date : visibleWithdrawalErrors.date}
+              label="Date"
+              name="date"
+            >
               <input
                 id="date"
                 name="date"
                 type="date"
-                value={form.date}
-                onBlur={() => markTouched('date')}
-                onChange={(event) => updateField('date', event.target.value)}
+                value={entryType === 'expense' ? form.date : withdrawalForm.date}
+                onBlur={() =>
+                  entryType === 'expense' ? markTouched('date') : markWithdrawalTouched('date')
+                }
+                onChange={(event) =>
+                  entryType === 'expense'
+                    ? updateField('date', event.target.value)
+                    : updateWithdrawalField('date', event.target.value)
+                }
               />
-            </ExpenseField>
+            </EntryField>
 
-            <ExpenseField error={visibleErrors.paymentMethod} label="Payment method" name="paymentMethod">
-              <select
-                id="paymentMethod"
-                name="paymentMethod"
-                value={form.paymentMethod}
-                onBlur={() => markTouched('paymentMethod')}
-                onChange={(event) => updateField('paymentMethod', event.target.value)}
-              >
-                <option value="">Blank</option>
-                {paymentMethods.map((method) => (
-                  <option key={method} value={method}>
-                    {paymentMethodLabels[method]}
-                  </option>
-                ))}
-              </select>
-            </ExpenseField>
+            {entryType === 'expense' && (
+              <EntryField error={visibleErrors.paymentMethod} label="Payment method" name="paymentMethod">
+                <select
+                  id="paymentMethod"
+                  name="paymentMethod"
+                  value={form.paymentMethod}
+                  onBlur={() => markTouched('paymentMethod')}
+                  onChange={(event) => updateField('paymentMethod', event.target.value)}
+                >
+                  <option value="">Blank</option>
+                  {paymentMethods.map((method) => (
+                    <option key={method} value={method}>
+                      {paymentMethodLabels[method]}
+                    </option>
+                  ))}
+                </select>
+              </EntryField>
+            )}
           </div>
 
-          <ExpenseField error={visibleErrors.note} label="Note" name="note">
+          <EntryField
+            error={entryType === 'expense' ? visibleErrors.note : visibleWithdrawalErrors.note}
+            label="Note"
+            name="note"
+          >
             <input
               id="note"
               name="note"
               type="text"
               maxLength={80}
-              value={form.note}
-              onBlur={() => markTouched('note')}
-              onChange={(event) => updateField('note', event.target.value)}
+              value={entryType === 'expense' ? form.note : withdrawalForm.note}
+              onBlur={() =>
+                entryType === 'expense' ? markTouched('note') : markWithdrawalTouched('note')
+              }
+              onChange={(event) =>
+                entryType === 'expense'
+                  ? updateField('note', event.target.value)
+                  : updateWithdrawalField('note', event.target.value)
+              }
             />
-          </ExpenseField>
+          </EntryField>
 
           <div className="budget-preview" aria-live="polite">
             <span>Home-currency preview</span>
             <strong>{convertedAmount}</strong>
           </div>
 
-          <button className="setup-submit" type="submit" disabled={!validation.isValid || isSaving}>
-            {isSaving ? 'Saving expense...' : 'Save expense'}
+          <button className="setup-submit" type="submit" disabled={!activeValidation.isValid || isSaving}>
+            {isSaving
+              ? 'Saving entry...'
+              : entryType === 'expense'
+                ? 'Save expense'
+                : 'Save withdrawal'}
           </button>
         </form>
       </section>
@@ -869,14 +986,14 @@ function Field({ children, error, label, name }: FieldProps) {
   )
 }
 
-type ExpenseFieldProps = {
+type EntryFieldProps = {
   children: ReactElement
   error?: string
   label: string
-  name: keyof ExpenseInput
+  name: keyof ExpenseInput | keyof CashWithdrawalInput
 }
 
-function ExpenseField({ children, error, label, name }: ExpenseFieldProps) {
+function EntryField({ children, error, label, name }: EntryFieldProps) {
   return (
     <label className="field" htmlFor={name}>
       <span>{label}</span>
@@ -906,6 +1023,15 @@ function getVisibleExpenseErrors(
   return Object.fromEntries(
     Object.entries(errors).filter(([field]) => touched[field as keyof ExpenseInput]),
   ) as ExpenseValidationErrors
+}
+
+function getVisibleCashWithdrawalErrors(
+  errors: CashWithdrawalValidationErrors,
+  touched: Partial<Record<keyof CashWithdrawalInput, boolean>>,
+): CashWithdrawalValidationErrors {
+  return Object.fromEntries(
+    Object.entries(errors).filter(([field]) => touched[field as keyof CashWithdrawalInput]),
+  ) as CashWithdrawalValidationErrors
 }
 
 function compareEntriesByDateThenCreated(first: TripEntry, second: TripEntry): number {
