@@ -1,73 +1,88 @@
-# React + TypeScript + Vite
+# Japan Expense Tracker
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Japan Expense Tracker is a mobile-first PWA for tracking spending during a Japan trip. It stores one active trip locally, works offline after the first visit, treats JPY as the primary expense currency, and keeps the traveler's home-currency budget visible for pacing decisions.
 
-Currently, two official plugins are available:
+The app is intentionally frontend-only: no accounts, backend, cloud sync, live exchange-rate calls, or receipt storage. It is built to be practical for travel and readable as a portfolio project.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Product Highlights
 
-## React Compiler
+- First-run trip setup with trip dates, home currency, total budget, and manual exchange rate.
+- Deterministic `Japan Spring Trip` demo data for quick review.
+- Expense and cash withdrawal entry with edit and delete flows.
+- Cash withdrawals appear in history and CSV export but are excluded from spending totals.
+- Dashboard analytics for total spend, remaining budget, daily pacing, category breakdown, and recent activity.
+- Search, filters, sorting, contextual totals, and complete CSV export.
+- Local IndexedDB persistence with PWA app-shell caching.
+- Light and dark system theme support.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Demo Path
 
-## Expanding the ESLint configuration
+1. Run the app locally with `npm run dev`.
+2. Open the local Vite URL in a browser.
+3. Choose `Load demo trip` from the first-run setup screen.
+4. Review the Dashboard for budget pace, category totals, and recent activity.
+5. Open Expenses to search, filter, sort, edit, delete, add entries, and export CSV.
+6. Open Settings to adjust trip details or reset local trip data.
+7. Build or preview the production bundle to inspect PWA install/offline behavior.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+The demo trip is `Japan Spring Trip`, April 6-15, 2026, with a `3500 CAD` budget and `1 CAD = 110 JPY`.
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+## Local Development
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+Install dependencies:
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Start the dev server:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run dev
 ```
+
+Run lint:
+
+```bash
+npm run lint
+```
+
+Run unit tests:
+
+```bash
+npm run test
+```
+
+Build the production app:
+
+```bash
+npm run build
+```
+
+Preview the production build:
+
+```bash
+npm run preview
+```
+
+## Testing
+
+Vitest covers the core domain modules first: trip setup validation, currency conversion, budget analytics, filtering/sorting behavior, CSV generation, and deterministic demo data.
+
+The UI keeps calculations and persistence boundaries separated so component and end-to-end tests can be added later without reworking the product logic.
+
+## PWA Behavior
+
+The app uses `vite-plugin-pwa` to generate a web app manifest and service worker during production builds. The service worker caches the app shell so the interface can load offline after the first visit. Trip settings and entries are stored in the browser through IndexedDB and remain local to that browser.
+
+PWA icons live in `public/`, including standard, maskable, and Apple touch variants.
+
+## Tech Stack
+
+- React 19
+- TypeScript
+- Vite
+- Vitest
+- ESLint
+- `vite-plugin-pwa`
+- IndexedDB through a small local persistence adapter

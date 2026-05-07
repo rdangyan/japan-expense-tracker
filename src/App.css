@@ -419,7 +419,7 @@ p {
 h1 {
   max-width: 12ch;
   color: var(--text-strong);
-  font-size: clamp(2rem, 8vw, 4.6rem);
+  font-size: 2.6rem;
   line-height: 0.95;
   letter-spacing: 0;
 }
@@ -461,6 +461,13 @@ h3 {
   justify-content: space-between;
   gap: 12px;
   border-bottom: 1px solid var(--border);
+}
+
+.tab-heading > div,
+.sheet-header > div,
+.entry-export-row > div,
+.dashboard-card-heading > div {
+  min-width: 0;
 }
 
 .primary-action,
@@ -848,6 +855,7 @@ h3 {
   min-width: 0;
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 12px;
 }
@@ -861,7 +869,6 @@ h3 {
   color: var(--text-muted);
   font-size: 0.86rem;
   font-weight: 720;
-  white-space: nowrap;
 }
 
 .category-breakdown-list li:nth-child(2n) .category-bar span {
@@ -1054,6 +1061,19 @@ h3 {
   font-weight: 680;
 }
 
+.brand-name,
+.brand-subtitle,
+.entry-note,
+.entry-meta,
+.dashboard-card p,
+.filtered-empty-state p,
+.empty-state p,
+.entry-export-row p,
+.trip-summary dd,
+.settings-summary dd {
+  overflow-wrap: anywhere;
+}
+
 .entry-actions {
   position: relative;
   align-self: start;
@@ -1079,6 +1099,11 @@ h3 {
 .entry-actions summary:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 3px;
+}
+
+.entry-actions[open] summary {
+  color: var(--accent);
+  border-color: var(--accent-border);
 }
 
 .entry-actions-menu {
@@ -1381,6 +1406,10 @@ a:focus-visible {
 }
 
 @media (min-width: 720px) {
+  h1 {
+    font-size: 3.6rem;
+  }
+
   .setup-card {
     padding: 32px;
   }
@@ -1454,6 +1483,10 @@ a:focus-visible {
 }
 
 @media (min-width: 980px) {
+  h1 {
+    font-size: 4.2rem;
+  }
+
   .bottom-tabs {
     width: min(100% - 36px, 36rem);
     inset-inline: 50% auto;
@@ -1462,5 +1495,65 @@ a:focus-visible {
     border: 1px solid var(--border);
     border-radius: 24px;
     box-shadow: var(--shadow-lg);
+  }
+}
+
+@media (max-width: 420px) {
+  .app-header {
+    gap: 10px;
+  }
+
+  .brand {
+    gap: 9px;
+  }
+
+  .brand-mark {
+    width: 40px;
+    height: 40px;
+  }
+
+  .header-actions {
+    gap: 6px;
+  }
+
+  .icon-button {
+    width: 40px;
+    min-height: 40px;
+    border-radius: 12px;
+  }
+
+  .tab-heading,
+  .entry-export-row,
+  .dashboard-card-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .tab-heading .primary-action,
+  .entry-export-row .secondary-action {
+    width: 100%;
+  }
+
+  .entry-filter-grid,
+  .entry-stats,
+  .dashboard-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .managed-entry-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .entry-actions {
+    justify-self: end;
+  }
+
+  .dialog-actions {
+    flex-direction: column-reverse;
+  }
+
+  .dialog-actions .secondary-action,
+  .dialog-actions .danger-action {
+    width: 100%;
   }
 }

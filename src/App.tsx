@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { FormEvent, ReactElement } from 'react'
+import { cloneElement, useEffect, useMemo, useRef, useState } from 'react'
+import type { FormEvent, ReactElement, RefObject } from 'react'
 import './App.css'
 import {
   convertHomeToJpy,
@@ -73,23 +73,20 @@ const tabs: Tab[] = [
 const emptyStates = {
   dashboard: {
     eyebrow: 'Trip overview',
-    title: 'Your Japan spending snapshot will live here.',
-    body: 'After trip setup and entries are added, this view will show budget pace, recent activity, and category highlights.',
-    action: 'Add expense coming soon',
+    title: 'Your spending snapshot is ready for the first entry.',
+    body: 'Add an expense or cash withdrawal to populate budget pace, recent activity, and category highlights.',
   },
   expenses: {
     eyebrow: 'Expense history',
     title: 'No expenses or cash withdrawals yet.',
-    body: 'This tab will become the searchable trip ledger for meals, trains, lodging, shopping, and ATM withdrawals.',
-    action: 'Entry form coming soon',
+    body: 'Start the searchable trip ledger with meals, trains, lodging, shopping, or ATM withdrawals.',
   },
   settings: {
     eyebrow: 'Trip settings',
     title: 'Trip details are stored locally.',
-    body: 'This read-only view shows the first-run setup details. Editing arrives in a later issue.',
-    action: 'Settings editing coming soon',
+    body: 'Edit trip dates, budget, currency, and exchange rate without leaving this browser.',
   },
-} satisfies Record<TabId, { eyebrow: string; title: string; body: string; action: string }>
+} satisfies Record<TabId, { eyebrow: string; title: string; body: string }>
 
 function App() {
   const [activeTab, setActiveTab] = useState<TabId>('dashboard')
@@ -188,7 +185,6 @@ function App() {
           </span>
           <span>
             <span className="brand-name">Japan Expense Tracker</span>
-            <span className="brand-subtitle">JPY-first travel budgeting</span>
           </span>
         </a>
 
@@ -328,6 +324,8 @@ function App() {
                 <TabIcon icon={currentTab.icon} />
               </div>
               <p className="empty-eyebrow">{emptyState.eyebrow}</p>
+              <h3>{emptyState.title}</h3>
+              <p>{emptyState.body}</p>
 
               {!hasEntries && (
                 <button
@@ -367,22 +365,24 @@ function App() {
         })}
       </nav>
 
-      <ExpenseBottomSheet
-        isOpen={isExpenseSheetOpen}
-        editingEntry={editingEntry}
-        trip={trip}
-        onClose={() => {
-          setIsExpenseSheetOpen(false)
-          setEditingEntry(null)
-        }}
-        onSaved={(entry) => {
-          setEntries((current) =>
-            upsertEntry(current, entry).sort(compareEntriesByDateThenCreated),
-          )
-          setIsExpenseSheetOpen(false)
-          setEditingEntry(null)
-        }}
-      />
+      {isExpenseSheetOpen && (
+        <ExpenseBottomSheet
+          key={editingEntry?.id ?? 'new-entry'}
+          editingEntry={editingEntry}
+          trip={trip}
+          onClose={() => {
+            setIsExpenseSheetOpen(false)
+            setEditingEntry(null)
+          }}
+          onSaved={(entry) => {
+            setEntries((current) =>
+              upsertEntry(current, entry).sort(compareEntriesByDateThenCreated),
+            )
+            setIsExpenseSheetOpen(false)
+            setEditingEntry(null)
+          }}
+        />
+      )}
 
       {deletingEntry && (
         <DeleteEntryDialog
@@ -469,7 +469,12 @@ function TripSetupScreen({ installPrompt, loadError, onTripCreated }: TripSetupS
   function updateField(name: keyof TripSetupInput, value: string) {
     setForm((current) => ({
       ...current,
-      [name]: name === 'homeCurrency' ? value.toUpperCase().slice(0, 3) : value,
+      [name]:
+        name === 'homeCurrency'
+          ? value.toUpperCase().slice(0, 3)
+          : isTripDateField(name)
+            ? formatIsoDateInput(value)
+            : value,
     }))
   }
 
@@ -565,7 +570,10 @@ function TripSetupScreen({ installPrompt, loadError, onTripCreated }: TripSetupS
               <input
                 id="startDate"
                 name="startDate"
-                type="date"
+                type="text"
+                inputMode="numeric"
+                pattern="\d{4}-\d{2}-\d{2}"
+                placeholder="YYYY-MM-DD"
                 value={form.startDate}
                 onBlur={() => markTouched('startDate')}
                 onChange={(event) => updateField('startDate', event.target.value)}
@@ -576,7 +584,10 @@ function TripSetupScreen({ installPrompt, loadError, onTripCreated }: TripSetupS
               <input
                 id="endDate"
                 name="endDate"
-                type="date"
+                type="text"
+                inputMode="numeric"
+                pattern="\d{4}-\d{2}-\d{2}"
+                placeholder="YYYY-MM-DD"
                 value={form.endDate}
                 onBlur={() => markTouched('endDate')}
                 onChange={(event) => updateField('endDate', event.target.value)}
@@ -772,6 +783,59 @@ function InstallCard({ installPrompt }: { installPrompt: InstallPromptState }) {
   )
 }
 
+function useDialogFocusTrap<T extends HTMLElement>(
+  containerRef: RefObject<T | null>,
+  onDismiss: () => void,
+) {
+  useEffect(() => {
+    const container = containerRef.current
+
+    if (!container) {
+      return
+    }
+
+    const dialog = container
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        onDismiss()
+        return
+      }
+
+      if (event.key !== 'Tab') {
+        return
+      }
+
+      const focusableElements = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => !element.hasAttribute('hidden'))
+
+      if (focusableElements.length === 0) {
+        event.preventDefault()
+        dialog.focus()
+        return
+      }
+
+      const firstElement = focusableElements[0]
+      const lastElement = focusableElements.at(-1) ?? firstElement
+
+      if (event.shiftKey && document.activeElement === firstElement) {
+        event.preventDefault()
+        lastElement.focus()
+      } else if (!event.shiftKey && document.activeElement === lastElement) {
+        event.preventDefault()
+        firstElement.focus()
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [containerRef, onDismiss])
+}
+
 type SettingsPanelProps = {
   entries: TripEntry[]
   trip: TripSettings
@@ -799,17 +863,16 @@ function SettingsPanel({ entries, trip, onTripUpdated, onResetTrip }: SettingsPa
       : []
   const hasChanges = JSON.stringify(form) !== JSON.stringify(tripToFormInput(trip))
 
-  useEffect(() => {
-    setForm(tripToFormInput(trip))
-    setTouched({})
-    setSubmitError(null)
-  }, [trip])
-
   function updateField(name: keyof TripSetupInput, value: string) {
     setSaveMessage(null)
     setForm((current) => ({
       ...current,
-      [name]: name === 'homeCurrency' ? value.toUpperCase().slice(0, 3) : value,
+      [name]:
+        name === 'homeCurrency'
+          ? value.toUpperCase().slice(0, 3)
+          : isTripDateField(name)
+            ? formatIsoDateInput(value)
+            : value,
     }))
   }
 
@@ -872,7 +935,10 @@ function SettingsPanel({ entries, trip, onTripUpdated, onResetTrip }: SettingsPa
             <input
               id="startDate"
               name="startDate"
-              type="date"
+              type="text"
+              inputMode="numeric"
+              pattern="\d{4}-\d{2}-\d{2}"
+              placeholder="YYYY-MM-DD"
               value={form.startDate}
               onBlur={() => markTouched('startDate')}
               onChange={(event) => updateField('startDate', event.target.value)}
@@ -883,7 +949,10 @@ function SettingsPanel({ entries, trip, onTripUpdated, onResetTrip }: SettingsPa
             <input
               id="endDate"
               name="endDate"
-              type="date"
+              type="text"
+              inputMode="numeric"
+              pattern="\d{4}-\d{2}-\d{2}"
+              placeholder="YYYY-MM-DD"
               value={form.endDate}
               onBlur={() => markTouched('endDate')}
               onChange={(event) => updateField('endDate', event.target.value)}
@@ -1006,7 +1075,6 @@ function SettingsPanel({ entries, trip, onTripUpdated, onResetTrip }: SettingsPa
 }
 
 type ExpenseBottomSheetProps = {
-  isOpen: boolean
   editingEntry: TripEntry | null
   trip: TripSettings
   onClose: () => void
@@ -1029,22 +1097,50 @@ const blankCashWithdrawalForm: CashWithdrawalInput = {
 
 type AddEntryType = 'expense' | 'cashWithdrawal'
 
+function getInitialExpenseForm(trip: TripSettings, editingEntry: TripEntry | null): ExpenseInput {
+  if (editingEntry?.type !== 'expense') {
+    return { ...blankExpenseForm, date: trip.startDate }
+  }
+
+  return {
+    amountJpy: String(editingEntry.amountJpy),
+    category: editingEntry.category,
+    date: editingEntry.date,
+    paymentMethod: editingEntry.paymentMethod ?? '',
+    note: editingEntry.note ?? '',
+  }
+}
+
+function getInitialCashWithdrawalForm(
+  trip: TripSettings,
+  editingEntry: TripEntry | null,
+): CashWithdrawalInput {
+  if (editingEntry?.type !== 'cashWithdrawal') {
+    return { ...blankCashWithdrawalForm, date: trip.startDate }
+  }
+
+  return {
+    amountJpy: String(editingEntry.amountJpy),
+    date: editingEntry.date,
+    note: editingEntry.note ?? '',
+  }
+}
+
 function ExpenseBottomSheet({
-  isOpen,
   editingEntry,
   trip,
   onClose,
   onSaved,
 }: ExpenseBottomSheetProps) {
-  const [entryType, setEntryType] = useState<AddEntryType>('expense')
-  const [form, setForm] = useState<ExpenseInput>(() => ({
-    ...blankExpenseForm,
-    date: trip.startDate,
-  }))
-  const [withdrawalForm, setWithdrawalForm] = useState<CashWithdrawalInput>(() => ({
-    ...blankCashWithdrawalForm,
-    date: trip.startDate,
-  }))
+  const [entryType, setEntryType] = useState<AddEntryType>(
+    editingEntry?.type === 'cashWithdrawal' ? 'cashWithdrawal' : 'expense',
+  )
+  const [form, setForm] = useState<ExpenseInput>(() =>
+    getInitialExpenseForm(trip, editingEntry),
+  )
+  const [withdrawalForm, setWithdrawalForm] = useState<CashWithdrawalInput>(() =>
+    getInitialCashWithdrawalForm(trip, editingEntry),
+  )
   const [touched, setTouched] = useState<Partial<Record<keyof ExpenseInput, boolean>>>({})
   const [withdrawalTouched, setWithdrawalTouched] = useState<
     Partial<Record<keyof CashWithdrawalInput, boolean>>
@@ -1052,6 +1148,7 @@ function ExpenseBottomSheet({
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const bottomSheetRef = useRef<HTMLElement>(null)
   const isEditing = editingEntry !== null
   const expenseValidation = useMemo(() => validateExpenseInput(form), [form])
   const withdrawalValidation = useMemo(
@@ -1074,54 +1171,10 @@ function ExpenseBottomSheet({
   const showOutsideTripWarning = activeDate !== '' && !isDateWithinTrip(activeDate, trip)
 
   useEffect(() => {
-    if (isOpen) {
-      if (editingEntry?.type === 'expense') {
-        setEntryType('expense')
-        setForm({
-          amountJpy: String(editingEntry.amountJpy),
-          category: editingEntry.category,
-          date: editingEntry.date,
-          paymentMethod: editingEntry.paymentMethod ?? '',
-          note: editingEntry.note ?? '',
-        })
-      } else if (editingEntry?.type === 'cashWithdrawal') {
-        setEntryType('cashWithdrawal')
-        setWithdrawalForm({
-          amountJpy: String(editingEntry.amountJpy),
-          date: editingEntry.date,
-          note: editingEntry.note ?? '',
-        })
-      } else {
-        setEntryType('expense')
-        setForm({ ...blankExpenseForm, date: trip.startDate })
-        setWithdrawalForm({ ...blankCashWithdrawalForm, date: trip.startDate })
-      }
-      setTouched({})
-      setWithdrawalTouched({})
-      setSubmitError(null)
-      window.setTimeout(() => closeButtonRef.current?.focus(), 0)
-    }
-  }, [editingEntry, isOpen, trip.startDate])
+    window.setTimeout(() => closeButtonRef.current?.focus(), 0)
+  }, [])
 
-  useEffect(() => {
-    if (!isOpen) {
-      return
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        onClose()
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, onClose])
-
-  if (!isOpen) {
-    return null
-  }
+  useDialogFocusTrap(bottomSheetRef, onClose)
 
   function updateField(name: keyof ExpenseInput, value: string) {
     setForm((current) => ({
@@ -1210,10 +1263,12 @@ function ExpenseBottomSheet({
     <div className="sheet-layer" role="presentation">
       <button className="sheet-backdrop" type="button" aria-label="Close entry form" onClick={onClose} />
       <section
+        ref={bottomSheetRef}
         className="bottom-sheet"
         aria-labelledby="expense-sheet-title"
         aria-modal="true"
         role="dialog"
+        tabIndex={-1}
       >
         <div className="sheet-handle" aria-hidden="true" />
         <div className="sheet-header">
@@ -1552,7 +1607,7 @@ function EntryManagementList({ entries, trip, onEdit, onDelete, onAdd }: EntryMa
               pattern="\d{4}-\d{2}-\d{2}"
               placeholder="YYYY-MM-DD"
               value={startDate}
-              onChange={(event) => setStartDate(event.target.value)}
+              onChange={(event) => setStartDate(formatIsoDateInput(event.target.value))}
             />
           </label>
 
@@ -1566,7 +1621,7 @@ function EntryManagementList({ entries, trip, onEdit, onDelete, onAdd }: EntryMa
               pattern="\d{4}-\d{2}-\d{2}"
               placeholder="YYYY-MM-DD"
               value={endDate}
-              onChange={(event) => setEndDate(event.target.value)}
+              onChange={(event) => setEndDate(formatIsoDateInput(event.target.value))}
             />
           </label>
 
@@ -1657,17 +1712,22 @@ function EntryManagementList({ entries, trip, onEdit, onDelete, onAdd }: EntryMa
                 </span>
               </div>
               <details className="entry-actions">
-                <summary aria-label={`Open actions for ${entry.note || formatJpy(entry.amountJpy)}`}>
+                <summary
+                  aria-haspopup="menu"
+                  aria-label={`Open actions for ${entry.note || formatJpy(entry.amountJpy)}`}
+                >
                   <MoreIcon />
                 </summary>
-                <div className="entry-actions-menu" role="menu">
-                  <button type="button" role="menuitem" onClick={() => onEdit(entry)}>
+                <div
+                  className="entry-actions-menu"
+                  aria-label={`Actions for ${entry.note || formatJpy(entry.amountJpy)}`}
+                >
+                  <button type="button" onClick={() => onEdit(entry)}>
                     Edit
                   </button>
                   <button
                     className="danger-menu-item"
                     type="button"
-                    role="menuitem"
                     onClick={() => onDelete(entry)}
                   >
                     Delete
@@ -1719,32 +1779,25 @@ function DeleteEntryDialog({
   onConfirm,
 }: DeleteEntryDialogProps) {
   const cancelButtonRef = useRef<HTMLButtonElement>(null)
+  const dialogRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
     cancelButtonRef.current?.focus()
   }, [])
 
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        onCancel()
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onCancel])
+  useDialogFocusTrap(dialogRef, onCancel)
 
   return (
     <div className="dialog-layer" role="presentation">
       <div className="dialog-backdrop" />
       <section
+        ref={dialogRef}
         className="confirm-dialog"
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="delete-entry-title"
         aria-describedby="delete-entry-description"
+        tabIndex={-1}
       >
         <div>
           <p className="section-kicker">Delete entry</p>
@@ -1792,32 +1845,25 @@ type ResetTripDialogProps = {
 
 function ResetTripDialog({ error, isResetting, onCancel, onConfirm }: ResetTripDialogProps) {
   const cancelButtonRef = useRef<HTMLButtonElement>(null)
+  const dialogRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
     cancelButtonRef.current?.focus()
   }, [])
 
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        onCancel()
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onCancel])
+  useDialogFocusTrap(dialogRef, onCancel)
 
   return (
     <div className="dialog-layer" role="presentation">
       <div className="dialog-backdrop" />
       <section
+        ref={dialogRef}
         className="confirm-dialog"
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="reset-trip-dialog-title"
         aria-describedby="reset-trip-dialog-description"
+        tabIndex={-1}
       >
         <div>
           <p className="section-kicker">Delete trip data</p>
@@ -2074,20 +2120,29 @@ function CumulativeSpendingChart({ analytics }: { analytics: DashboardAnalytics 
   )
 }
 
+type AccessibleFieldElement = ReactElement<Record<string, unknown>>
+
 type FieldProps = {
-  children: ReactElement
+  children: AccessibleFieldElement
   error?: string
   label: string
   name: keyof TripSetupInput
 }
 
 function Field({ children, error, label, name }: FieldProps) {
+  const errorId = `${name}-error`
+  const describedBy = children.props['aria-describedby']
+  const invalid = children.props['aria-invalid']
+
   return (
     <label className="field" htmlFor={name}>
       <span>{label}</span>
-      {children}
+      {cloneElement(children, {
+        'aria-describedby': error ? errorId : describedBy,
+        'aria-invalid': error ? true : invalid,
+      })}
       {error && (
-        <span className="field-error" id={`${name}-error`}>
+        <span className="field-error" id={errorId}>
           {error}
         </span>
       )}
@@ -2096,19 +2151,26 @@ function Field({ children, error, label, name }: FieldProps) {
 }
 
 type EntryFieldProps = {
-  children: ReactElement
+  children: AccessibleFieldElement
   error?: string
   label: string
   name: keyof ExpenseInput | keyof CashWithdrawalInput
 }
 
 function EntryField({ children, error, label, name }: EntryFieldProps) {
+  const errorId = `${name}-error`
+  const describedBy = children.props['aria-describedby']
+  const invalid = children.props['aria-invalid']
+
   return (
     <label className="field" htmlFor={name}>
       <span>{label}</span>
-      {children}
+      {cloneElement(children, {
+        'aria-describedby': error ? errorId : describedBy,
+        'aria-invalid': error ? true : invalid,
+      })}
       {error && (
-        <span className="field-error" id={`${name}-error`}>
+        <span className="field-error" id={errorId}>
           {error}
         </span>
       )}
@@ -2155,6 +2217,19 @@ function upsertEntry(entries: TripEntry[], nextEntry: TripEntry): TripEntry[] {
   }
 
   return entries.map((entry, index) => (index === existingIndex ? nextEntry : entry))
+}
+
+function isTripDateField(name: keyof TripSetupInput): boolean {
+  return name === 'startDate' || name === 'endDate'
+}
+
+function formatIsoDateInput(value: string): string {
+  const digits = value.replace(/\D/g, '').slice(0, 8)
+  const year = digits.slice(0, 4)
+  const month = digits.slice(4, 6)
+  const day = digits.slice(6, 8)
+
+  return [year, month, day].filter(Boolean).join('-')
 }
 
 function getChartPoints(
