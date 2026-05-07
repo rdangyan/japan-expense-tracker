@@ -14,10 +14,13 @@ import {
   formatJpy,
   getDashboardAnalytics,
   getEntryListView,
+  isDateWithinTrip,
+  isEntryWithinTrip,
   paymentMethodLabels,
   paymentMethods,
   updateCashWithdrawalEntry,
   updateExpenseEntry,
+  updateTripSettings,
   validateCashWithdrawalInput,
   validateExpenseInput,
   validateTripSetup,
@@ -38,6 +41,7 @@ import {
 } from './lib/trip'
 import { createDemoTrip } from './lib/demoTrip'
 import {
+  deleteActiveTripData,
   deleteTripEntry,
   getActiveTrip,
   getEntriesForTrip,
@@ -90,6 +94,9 @@ function App() {
   const [deletingEntry, setDeletingEntry] = useState<TripEntry | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isResetDialogOpen, setIsResetDialogOpen] = useState(false)
+  const [resetError, setResetError] = useState<string | null>(null)
+  const [isResettingTrip, setIsResettingTrip] = useState(false)
   const [isLoadingTrip, setIsLoadingTrip] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const currentTab = tabs.find((tab) => tab.id === activeTab) ?? tabs[0]
@@ -278,6 +285,16 @@ function App() {
 
           {activeTab === 'dashboard' ? (
             <DashboardAnalyticsPanel analytics={analytics} trip={trip} />
+          ) : activeTab === 'settings' ? (
+            <SettingsPanel
+              entries={entries}
+              trip={trip}
+              onTripUpdated={setTrip}
+              onResetTrip={() => {
+                setResetError(null)
+                setIsResetDialogOpen(true)
+              }}
+            />
           ) : activeTab === 'expenses' && hasEntries ? (
             <EntryManagementList
               entries={entries}
@@ -302,25 +319,7 @@ function App() {
               </div>
               <p className="empty-eyebrow">{emptyState.eyebrow}</p>
 
-              {activeTab === 'settings' && (
-                <dl className="settings-summary" aria-label="Persisted trip settings">
-                  <div>
-                    <dt>Trip</dt>
-                    <dd>{trip.tripName}</dd>
-                  </div>
-                  <div>
-                    <dt>Budget</dt>
-                    <dd>{formatHomeCurrency(trip.totalBudgetHome, trip.homeCurrency)}</dd>
-                  </div>
-                  <div>
-                    <dt>Rate</dt>
-                    <dd>
-                      1 {trip.homeCurrency} = {formatJpy(trip.exchangeRateJpy)}
-                    </dd>
-                  </div>
-                </dl>
-              )}
-              {activeTab !== 'settings' && !hasEntries && (
+              {!hasEntries && (
                 <button
                   className="secondary-action"
                   type="button"
@@ -330,11 +329,6 @@ function App() {
                   }}
                 >
                   Add expense
-                </button>
-              )}
-              {activeTab === 'settings' && (
-                <button className="secondary-action" type="button" disabled>
-                  {emptyState.action}
                 </button>
               )}
             </div>
@@ -399,6 +393,33 @@ function App() {
               })
               .catch(() => setDeleteError('Entry could not be deleted in this browser.'))
               .finally(() => setIsDeleting(false))
+          }}
+        />
+      )}
+
+      {isResetDialogOpen && (
+        <ResetTripDialog
+          error={resetError}
+          isResetting={isResettingTrip}
+          onCancel={() => {
+            setIsResetDialogOpen(false)
+            setResetError(null)
+          }}
+          onConfirm={() => {
+            setIsResettingTrip(true)
+            setResetError(null)
+            deleteActiveTripData()
+              .then(() => {
+                setTrip(null)
+                setEntries([])
+                setActiveTab('dashboard')
+                setIsExpenseSheetOpen(false)
+                setEditingEntry(null)
+                setDeletingEntry(null)
+                setIsResetDialogOpen(false)
+              })
+              .catch(() => setResetError('Trip data could not be deleted in this browser.'))
+              .finally(() => setIsResettingTrip(false))
           }}
         />
       )}
@@ -663,6 +684,239 @@ function TripSetupScreen({ loadError, onTripCreated }: TripSetupScreenProps) {
   )
 }
 
+type SettingsPanelProps = {
+  entries: TripEntry[]
+  trip: TripSettings
+  onTripUpdated: (trip: TripSettings) => void
+  onResetTrip: () => void
+}
+
+function SettingsPanel({ entries, trip, onTripUpdated, onResetTrip }: SettingsPanelProps) {
+  const [form, setForm] = useState<TripSetupInput>(() => tripToFormInput(trip))
+  const [touched, setTouched] = useState<Partial<Record<keyof TripSetupInput, boolean>>>({})
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [saveMessage, setSaveMessage] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const validation = useMemo(() => validateTripSetup(form), [form])
+  const visibleErrors = getVisibleErrors(validation.errors, touched)
+  const customCurrency = !currencyPresets.includes(form.homeCurrency as (typeof currencyPresets)[number])
+  const budgetPreview =
+    Number(form.totalBudgetHome) > 0 && Number(form.exchangeRateJpy) > 0
+      ? formatJpy(convertHomeToJpy(Number(form.totalBudgetHome), Number(form.exchangeRateJpy)))
+      : 'JPY 0'
+  const datePreviewTrip = { ...trip, startDate: form.startDate, endDate: form.endDate }
+  const outsideTripEntries =
+    !validation.errors.startDate && !validation.errors.endDate
+      ? entries.filter((entry) => !isEntryWithinTrip(entry, datePreviewTrip))
+      : []
+  const hasChanges = JSON.stringify(form) !== JSON.stringify(tripToFormInput(trip))
+
+  useEffect(() => {
+    setForm(tripToFormInput(trip))
+    setTouched({})
+    setSubmitError(null)
+  }, [trip])
+
+  function updateField(name: keyof TripSetupInput, value: string) {
+    setSaveMessage(null)
+    setForm((current) => ({
+      ...current,
+      [name]: name === 'homeCurrency' ? value.toUpperCase().slice(0, 3) : value,
+    }))
+  }
+
+  function markTouched(name: keyof TripSetupInput) {
+    setTouched((current) => ({ ...current, [name]: true }))
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setTouched({
+      tripName: true,
+      startDate: true,
+      endDate: true,
+      homeCurrency: true,
+      totalBudgetHome: true,
+      exchangeRateJpy: true,
+    })
+
+    if (!validation.isValid) {
+      return
+    }
+
+    const nextTrip = updateTripSettings(trip, form)
+    setIsSaving(true)
+    setSubmitError(null)
+    setSaveMessage(null)
+
+    saveActiveTrip(nextTrip)
+      .then(() => {
+        onTripUpdated(nextTrip)
+        setSaveMessage('Settings saved.')
+      })
+      .catch(() => setSubmitError('Trip settings could not be saved in this browser.'))
+      .finally(() => setIsSaving(false))
+  }
+
+  return (
+    <div className="settings-panel">
+      <form className="settings-form" onSubmit={handleSubmit} noValidate>
+        {(submitError || saveMessage) && (
+          <p className={submitError ? 'form-error' : 'form-success'} role={submitError ? 'alert' : 'status'}>
+            {submitError ?? saveMessage}
+          </p>
+        )}
+
+        <Field error={visibleErrors.tripName} label="Trip name" name="tripName">
+          <input
+            id="tripName"
+            name="tripName"
+            type="text"
+            maxLength={60}
+            value={form.tripName}
+            onBlur={() => markTouched('tripName')}
+            onChange={(event) => updateField('tripName', event.target.value)}
+          />
+        </Field>
+
+        <div className="form-grid">
+          <Field error={visibleErrors.startDate} label="Start date" name="startDate">
+            <input
+              id="startDate"
+              name="startDate"
+              type="date"
+              value={form.startDate}
+              onBlur={() => markTouched('startDate')}
+              onChange={(event) => updateField('startDate', event.target.value)}
+            />
+          </Field>
+
+          <Field error={visibleErrors.endDate} label="End date" name="endDate">
+            <input
+              id="endDate"
+              name="endDate"
+              type="date"
+              value={form.endDate}
+              onBlur={() => markTouched('endDate')}
+              onChange={(event) => updateField('endDate', event.target.value)}
+            />
+          </Field>
+        </div>
+
+        <fieldset className="currency-fieldset">
+          <legend>Home currency</legend>
+          <div className="currency-options">
+            {currencyPresets.map((currency) => (
+              <button
+                key={currency}
+                type="button"
+                className="currency-chip"
+                data-active={form.homeCurrency === currency}
+                onClick={() => {
+                  updateField('homeCurrency', currency)
+                  markTouched('homeCurrency')
+                }}
+              >
+                {currency}
+              </button>
+            ))}
+            <button
+              type="button"
+              className="currency-chip"
+              data-active={customCurrency}
+              onClick={() => updateField('homeCurrency', '')}
+            >
+              Custom
+            </button>
+          </div>
+          <input
+            id="homeCurrency"
+            name="homeCurrency"
+            type="text"
+            inputMode="text"
+            maxLength={3}
+            aria-describedby={visibleErrors.homeCurrency ? 'homeCurrency-error' : undefined}
+            value={form.homeCurrency}
+            onBlur={() => markTouched('homeCurrency')}
+            onChange={(event) => updateField('homeCurrency', event.target.value)}
+          />
+          {visibleErrors.homeCurrency && (
+            <p className="field-error" id="homeCurrency-error">
+              {visibleErrors.homeCurrency}
+            </p>
+          )}
+        </fieldset>
+
+        <div className="form-grid">
+          <Field
+            error={visibleErrors.totalBudgetHome}
+            label={`Total budget (${form.homeCurrency || 'home'})`}
+            name="totalBudgetHome"
+          >
+            <input
+              id="totalBudgetHome"
+              name="totalBudgetHome"
+              type="number"
+              min="0"
+              step="0.01"
+              inputMode="decimal"
+              value={form.totalBudgetHome}
+              onBlur={() => markTouched('totalBudgetHome')}
+              onChange={(event) => updateField('totalBudgetHome', event.target.value)}
+            />
+          </Field>
+
+          <Field
+            error={visibleErrors.exchangeRateJpy}
+            label="JPY per 1 home currency"
+            name="exchangeRateJpy"
+          >
+            <input
+              id="exchangeRateJpy"
+              name="exchangeRateJpy"
+              type="number"
+              min="0"
+              step="0.0001"
+              inputMode="decimal"
+              value={form.exchangeRateJpy}
+              onBlur={() => markTouched('exchangeRateJpy')}
+              onChange={(event) => updateField('exchangeRateJpy', event.target.value)}
+            />
+          </Field>
+        </div>
+
+        <div className="budget-preview" aria-live="polite">
+          <span>JPY budget preview</span>
+          <strong>{budgetPreview}</strong>
+        </div>
+
+        {outsideTripEntries.length > 0 && (
+          <p className="warning-note" role="status">
+            {outsideTripEntries.length} existing entry
+            {outsideTripEntries.length === 1 ? '' : ' entries'} outside these dates will remain in
+            history and totals, but stay excluded from pacing.
+          </p>
+        )}
+
+        <button className="setup-submit" type="submit" disabled={!validation.isValid || isSaving || !hasChanges}>
+          {isSaving ? 'Saving settings...' : 'Save settings'}
+        </button>
+      </form>
+
+      <section className="danger-zone" aria-labelledby="reset-trip-title">
+        <div>
+          <p className="section-kicker">Trip data</p>
+          <h3 id="reset-trip-title">Reset this browser</h3>
+          <p>Delete the active trip and every saved entry from local storage.</p>
+        </div>
+        <button className="danger-action" type="button" onClick={onResetTrip}>
+          Delete trip data
+        </button>
+      </section>
+    </div>
+  )
+}
+
 type ExpenseBottomSheetProps = {
   isOpen: boolean
   editingEntry: TripEntry | null
@@ -722,12 +976,14 @@ function ExpenseBottomSheet({
     withdrawalTouched,
   )
   const activeAmountJpy = entryType === 'expense' ? form.amountJpy : withdrawalForm.amountJpy
+  const activeDate = entryType === 'expense' ? form.date : withdrawalForm.date
   const activeValidation =
     entryType === 'expense' ? expenseValidation : withdrawalValidation
   const convertedAmount =
     Number(activeAmountJpy) > 0
       ? formatHomeCurrency(convertJpyToHome(Number(activeAmountJpy), trip.exchangeRateJpy), trip.homeCurrency)
       : formatHomeCurrency(0, trip.homeCurrency)
+  const showOutsideTripWarning = activeDate !== '' && !isDateWithinTrip(activeDate, trip)
 
   useEffect(() => {
     if (isOpen) {
@@ -1030,6 +1286,14 @@ function ExpenseBottomSheet({
             <strong>{convertedAmount}</strong>
           </div>
 
+          {showOutsideTripWarning && (
+            <p className="warning-note" role="status">
+              This date is outside {formatDate(trip.startDate)} to {formatDate(trip.endDate)}.
+              The entry will stay in history and totals, but expenses outside the trip are excluded
+              from pacing.
+            </p>
+          )}
+
           <button className="setup-submit" type="submit" disabled={!activeValidation.isValid || isSaving}>
             {isSaving
               ? isEditing
@@ -1237,12 +1501,18 @@ function EntryManagementList({ entries, trip, onEdit, onDelete, onAdd }: EntryMa
 
       {entryListView.entries.length > 0 ? (
         <ul className="managed-entry-list" aria-label="Expense and cash withdrawal history">
-          {entryListView.entries.map((entry) => (
+          {entryListView.entries.map((entry) => {
+            const outsideTrip = !isEntryWithinTrip(entry, trip)
+
+            return (
             <li key={entry.id} className="managed-entry-card">
               <div className="managed-entry-main">
-                <span className="entry-badge" data-entry-type={entry.type}>
-                  {entryTypeLabels[entry.type]}
-                </span>
+                <div className="entry-badge-row">
+                  <span className="entry-badge" data-entry-type={entry.type}>
+                    {entryTypeLabels[entry.type]}
+                  </span>
+                  {outsideTrip && <span className="outside-trip-badge">Outside trip dates</span>}
+                </div>
                 <strong>{formatJpy(entry.amountJpy)}</strong>
                 <span className="entry-note">
                   {entry.note || (entry.type === 'expense' ? `${entry.category} expense` : 'Cash withdrawal')}
@@ -1282,7 +1552,8 @@ function EntryManagementList({ entries, trip, onEdit, onDelete, onAdd }: EntryMa
                 </div>
               </details>
             </li>
-          ))}
+            )
+          })}
         </ul>
       ) : (
         <div className="filtered-empty-state">
@@ -1382,6 +1653,78 @@ function DeleteEntryDialog({
             onClick={onConfirm}
           >
             {isDeleting ? 'Deleting...' : 'Delete'}
+          </button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+type ResetTripDialogProps = {
+  error: string | null
+  isResetting: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}
+
+function ResetTripDialog({ error, isResetting, onCancel, onConfirm }: ResetTripDialogProps) {
+  const cancelButtonRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    cancelButtonRef.current?.focus()
+  }, [])
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        onCancel()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onCancel])
+
+  return (
+    <div className="dialog-layer" role="presentation">
+      <div className="dialog-backdrop" />
+      <section
+        className="confirm-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="reset-trip-dialog-title"
+        aria-describedby="reset-trip-dialog-description"
+      >
+        <div>
+          <p className="section-kicker">Delete trip data</p>
+          <h2 id="reset-trip-dialog-title">Reset this local trip?</h2>
+        </div>
+        <p id="reset-trip-dialog-description">
+          This permanently deletes the active trip settings and all entries saved in this browser.
+        </p>
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="dialog-actions">
+          <button
+            ref={cancelButtonRef}
+            className="secondary-action"
+            type="button"
+            disabled={isResetting}
+            onClick={onCancel}
+          >
+            Cancel
+          </button>
+          <button
+            className="danger-action"
+            type="button"
+            disabled={isResetting}
+            onClick={onConfirm}
+          >
+            {isResetting ? 'Deleting...' : 'Delete trip data'}
           </button>
         </div>
       </section>
@@ -1522,11 +1865,17 @@ function DashboardAnalyticsPanel({ analytics, trip }: DashboardAnalyticsPanelPro
         </div>
         {analytics.recentEntries.length > 0 ? (
           <ul className="dashboard-entry-list">
-            {analytics.recentEntries.map((entry) => (
+            {analytics.recentEntries.map((entry) => {
+              const outsideTrip = !isEntryWithinTrip(entry, trip)
+
+              return (
               <li key={entry.id}>
-                <span className="entry-badge" data-entry-type={entry.type}>
-                  {entryTypeLabels[entry.type]}
-                </span>
+                <div className="entry-badge-row">
+                  <span className="entry-badge" data-entry-type={entry.type}>
+                    {entryTypeLabels[entry.type]}
+                  </span>
+                  {outsideTrip && <span className="outside-trip-badge">Outside trip dates</span>}
+                </div>
                 <strong>{formatJpy(entry.amountJpy)}</strong>
                 <span className="entry-note">
                   {entry.note ||
@@ -1537,7 +1886,8 @@ function DashboardAnalyticsPanel({ analytics, trip }: DashboardAnalyticsPanelPro
                   {entry.type === 'expense' && <> · {entry.category}</>}
                 </span>
               </li>
-            ))}
+              )
+            })}
           </ul>
         ) : (
           <p className="dashboard-empty-copy">Add an expense or withdrawal to see recent activity.</p>
@@ -1708,6 +2058,17 @@ function getChartPoints(
 
 function roundChartCoordinate(value: number): number {
   return Math.round(value * 10) / 10
+}
+
+function tripToFormInput(trip: TripSettings): TripSetupInput {
+  return {
+    tripName: trip.tripName,
+    startDate: trip.startDate,
+    endDate: trip.endDate,
+    homeCurrency: trip.homeCurrency,
+    totalBudgetHome: String(trip.totalBudgetHome),
+    exchangeRateJpy: String(trip.exchangeRateJpy),
+  }
 }
 
 function formatDate(value: string): string {

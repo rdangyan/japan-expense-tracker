@@ -10,8 +10,11 @@ import {
   formatJpy,
   getDashboardAnalytics,
   getEntryListView,
+  isDateWithinTrip,
+  isEntryWithinTrip,
   updateCashWithdrawalEntry,
   updateExpenseEntry,
+  updateTripSettings,
   validateCashWithdrawalInput,
   validateExpenseInput,
   validateTripSetup,
@@ -86,6 +89,35 @@ describe('trip settings', () => {
     })
 
     vi.unstubAllGlobals()
+  })
+
+  it('updates editable settings while preserving stable trip identity', () => {
+    const original = createTripSettings(validInput, new Date('2026-01-02T03:04:05.000Z'))
+    const updated = updateTripSettings(
+      original,
+      {
+        tripName: '  Japan Autumn Trip  ',
+        startDate: '2026-10-01',
+        endDate: '2026-10-12',
+        homeCurrency: 'usd',
+        totalBudgetHome: '4200.50',
+        exchangeRateJpy: '155.25',
+      },
+      new Date('2026-02-03T04:05:06.000Z'),
+    )
+
+    expect(updated).toMatchObject({
+      key: original.key,
+      tripId: original.tripId,
+      tripName: 'Japan Autumn Trip',
+      startDate: '2026-10-01',
+      endDate: '2026-10-12',
+      homeCurrency: 'USD',
+      totalBudgetHome: 4200.5,
+      exchangeRateJpy: 155.25,
+      createdAt: original.createdAt,
+      updatedAt: '2026-02-03T04:05:06.000Z',
+    })
   })
 })
 
@@ -478,6 +510,57 @@ describe('dashboard analytics', () => {
     expect(view.expectedSpendToDateJpy).toBe(40000)
     expect(view.budgetStatus).toBe('onTrack')
     expect(view.outsideTripExpenseTotalJpy).toBe(5000)
+  })
+
+  it('keeps outside-trip expenses in totals while excluding them from pacing after date edits', () => {
+    const shortenedTrip = updateTripSettings(
+      trip,
+      {
+        tripName: trip.tripName,
+        startDate: '2026-04-07',
+        endDate: '2026-04-10',
+        homeCurrency: trip.homeCurrency,
+        totalBudgetHome: String(trip.totalBudgetHome),
+        exchangeRateJpy: String(trip.exchangeRateJpy),
+      },
+      new Date('2026-02-03T04:05:06.000Z'),
+    )
+    const view = getDashboardAnalytics(
+      shortenedTrip,
+      entries,
+      new Date('2026-04-07T00:00:00.000Z'),
+    )
+
+    expect(isEntryWithinTrip(firstDayFood, shortenedTrip)).toBe(false)
+    expect(isDateWithinTrip('2026-04-06', shortenedTrip)).toBe(false)
+    expect(view.totalSpentJpy).toBe(35000)
+    expect(view.inTripSpentToDateJpy).toBe(20000)
+    expect(view.outsideTripExpenseTotalJpy).toBe(15000)
+  })
+
+  it('recalculates exchange-rate-derived budget analytics without rewriting entries', () => {
+    const adjustedTrip = updateTripSettings(
+      trip,
+      {
+        tripName: trip.tripName,
+        startDate: trip.startDate,
+        endDate: trip.endDate,
+        homeCurrency: trip.homeCurrency,
+        totalBudgetHome: String(trip.totalBudgetHome),
+        exchangeRateJpy: '125',
+      },
+      new Date('2026-02-03T04:05:06.000Z'),
+    )
+    const view = getDashboardAnalytics(
+      adjustedTrip,
+      entries,
+      new Date('2026-04-07T00:00:00.000Z'),
+    )
+
+    expect(view.budgetJpy).toBe(125000)
+    expect(view.remainingJpy).toBe(90000)
+    expect(convertJpyToHome(firstDayFood.amountJpy, adjustedTrip.exchangeRateJpy)).toBe(80)
+    expect(firstDayFood.amountJpy).toBe(10000)
   })
 
   it('uses caution and over-budget thresholds against expected spending', () => {

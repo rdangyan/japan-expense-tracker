@@ -476,6 +476,23 @@ export function getEntryListView(
   }
 }
 
+export function updateTripSettings(
+  existingTrip: TripSettings,
+  input: TripSetupInput,
+  now = new Date(),
+): TripSettings {
+  return {
+    ...existingTrip,
+    tripName: input.tripName.trim(),
+    startDate: input.startDate,
+    endDate: input.endDate,
+    homeCurrency: input.homeCurrency.trim().toUpperCase(),
+    totalBudgetHome: Number(input.totalBudgetHome),
+    exchangeRateJpy: Number(input.exchangeRateJpy),
+    updatedAt: now.toISOString(),
+  }
+}
+
 export function getDashboardAnalytics(
   trip: TripSettings,
   entries: TripEntry[],
@@ -601,8 +618,16 @@ function getUtcDateMs(value: string): number {
   return new Date(`${value}T00:00:00.000Z`).getTime()
 }
 
-function isEntryWithinTrip(entry: TripEntry, trip: TripSettings): boolean {
-  return entry.date >= trip.startDate && entry.date <= trip.endDate
+export function isEntryWithinTrip(entry: TripEntry, trip: TripSettings): boolean {
+  return isDateWithinTrip(entry.date, trip)
+}
+
+export function isDateWithinTrip(date: string, trip: TripSettings): boolean {
+  if (!isValidIsoDate(date)) {
+    return false
+  }
+
+  return date >= trip.startDate && date <= trip.endDate
 }
 
 function getInTripExpenses(entries: TripEntry[], trip: TripSettings): ExpenseEntry[] {

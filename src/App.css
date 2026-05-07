@@ -236,6 +236,26 @@ select:focus {
   border-radius: 8px;
 }
 
+.form-success,
+.warning-note {
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 680;
+}
+
+.form-success {
+  color: var(--status-good);
+  background: var(--status-good-soft);
+  border: 1px solid var(--status-good-border);
+}
+
+.warning-note {
+  color: var(--status-caution);
+  background: var(--status-caution-soft);
+  border: 1px solid var(--status-caution-border);
+}
+
 .budget-preview {
   min-height: 58px;
   padding: 12px 14px;
@@ -547,6 +567,38 @@ h3 {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
+}
+
+.settings-panel {
+  min-height: 0;
+  padding: 18px;
+  display: grid;
+  gap: 16px;
+  flex: 1;
+  overflow: auto;
+}
+
+.settings-form {
+  display: grid;
+  gap: 14px;
+}
+
+.danger-zone {
+  padding: 14px;
+  display: grid;
+  gap: 14px;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
+  border-radius: 8px;
+}
+
+.danger-zone h3 {
+  font-size: 1.05rem;
+}
+
+.danger-zone p:not(.section-kicker) {
+  color: var(--text-muted);
+  font-size: 0.92rem;
 }
 
 .dashboard-grid {
@@ -877,10 +929,29 @@ h3 {
   font-weight: 800;
 }
 
+.entry-badge-row {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .entry-badge[data-entry-type='cashWithdrawal'] {
   color: var(--text-strong);
   background: var(--surface-strong);
   border-color: var(--border);
+}
+
+.outside-trip-badge {
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px 8px;
+  color: var(--status-caution);
+  background: var(--status-caution-soft);
+  border: 1px solid var(--status-caution-border);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
 }
 
 .entry-note {

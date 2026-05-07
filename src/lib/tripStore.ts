@@ -48,6 +48,17 @@ export function deleteTripEntry(entryId: string): Promise<void> {
   })
 }
 
+export function deleteActiveTripData(): Promise<void> {
+  return withStores('readwrite', [tripStoreName, entriesStoreName], (stores) => {
+    const writes: Promise<unknown>[] = [
+      requestToPromise(stores.tripSettings.delete(ACTIVE_TRIP_KEY)),
+      requestToPromise(stores.entries.clear()),
+    ]
+
+    return Promise.all(writes).then(() => undefined)
+  })
+}
+
 export function saveTripSnapshot(trip: TripSettings, entries: TripEntry[]): Promise<void> {
   return withStores('readwrite', [tripStoreName, entriesStoreName], (stores) => {
     const writes: Promise<unknown>[] = [
