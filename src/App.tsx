@@ -443,17 +443,21 @@ type TripSetupScreenProps = {
   onTripCreated: (trip: TripSettings, entries?: TripEntry[]) => void
 }
 
-const initialTripSetup: TripSetupInput = {
-  tripName: '',
-  startDate: '',
-  endDate: '',
-  homeCurrency: 'CAD',
-  totalBudgetHome: '',
-  exchangeRateJpy: '',
+function getInitialTripSetup(): TripSetupInput {
+  const today = getLocalDateInputValue()
+
+  return {
+    tripName: '',
+    startDate: today,
+    endDate: today,
+    homeCurrency: 'CAD',
+    totalBudgetHome: '',
+    exchangeRateJpy: '',
+  }
 }
 
 function TripSetupScreen({ installPrompt, loadError, onTripCreated }: TripSetupScreenProps) {
-  const [form, setForm] = useState<TripSetupInput>(initialTripSetup)
+  const [form, setForm] = useState<TripSetupInput>(() => getInitialTripSetup())
   const [touched, setTouched] = useState<Partial<Record<keyof TripSetupInput, boolean>>>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
@@ -1097,9 +1101,9 @@ const blankCashWithdrawalForm: CashWithdrawalInput = {
 
 type AddEntryType = 'expense' | 'cashWithdrawal'
 
-function getInitialExpenseForm(trip: TripSettings, editingEntry: TripEntry | null): ExpenseInput {
+function getInitialExpenseForm(editingEntry: TripEntry | null): ExpenseInput {
   if (editingEntry?.type !== 'expense') {
-    return { ...blankExpenseForm, date: trip.startDate }
+    return { ...blankExpenseForm, date: getLocalDateInputValue() }
   }
 
   return {
@@ -1112,11 +1116,10 @@ function getInitialExpenseForm(trip: TripSettings, editingEntry: TripEntry | nul
 }
 
 function getInitialCashWithdrawalForm(
-  trip: TripSettings,
   editingEntry: TripEntry | null,
 ): CashWithdrawalInput {
   if (editingEntry?.type !== 'cashWithdrawal') {
-    return { ...blankCashWithdrawalForm, date: trip.startDate }
+    return { ...blankCashWithdrawalForm, date: getLocalDateInputValue() }
   }
 
   return {
@@ -1136,10 +1139,10 @@ function ExpenseBottomSheet({
     editingEntry?.type === 'cashWithdrawal' ? 'cashWithdrawal' : 'expense',
   )
   const [form, setForm] = useState<ExpenseInput>(() =>
-    getInitialExpenseForm(trip, editingEntry),
+    getInitialExpenseForm(editingEntry),
   )
   const [withdrawalForm, setWithdrawalForm] = useState<CashWithdrawalInput>(() =>
-    getInitialCashWithdrawalForm(trip, editingEntry),
+    getInitialCashWithdrawalForm(editingEntry),
   )
   const [touched, setTouched] = useState<Partial<Record<keyof ExpenseInput, boolean>>>({})
   const [withdrawalTouched, setWithdrawalTouched] = useState<
@@ -1179,14 +1182,24 @@ function ExpenseBottomSheet({
   function updateField(name: keyof ExpenseInput, value: string) {
     setForm((current) => ({
       ...current,
-      [name]: name === 'note' ? value.replace(/[\r\n]/g, ' ').slice(0, 80) : value,
+      [name]:
+        name === 'note'
+          ? value.replace(/[\r\n]/g, ' ').slice(0, 80)
+          : name === 'date'
+            ? formatIsoDateInput(value)
+            : value,
     }))
   }
 
   function updateWithdrawalField(name: keyof CashWithdrawalInput, value: string) {
     setWithdrawalForm((current) => ({
       ...current,
-      [name]: name === 'note' ? value.replace(/[\r\n]/g, ' ').slice(0, 80) : value,
+      [name]:
+        name === 'note'
+          ? value.replace(/[\r\n]/g, ' ').slice(0, 80)
+          : name === 'date'
+            ? formatIsoDateInput(value)
+            : value,
     }))
   }
 
@@ -1369,7 +1382,10 @@ function ExpenseBottomSheet({
               <input
                 id="date"
                 name="date"
-                type="date"
+                type="text"
+                inputMode="numeric"
+                pattern="\d{4}-\d{2}-\d{2}"
+                placeholder="YYYY-MM-DD"
                 value={entryType === 'expense' ? form.date : withdrawalForm.date}
                 onBlur={() =>
                   entryType === 'expense' ? markTouched('date') : markWithdrawalTouched('date')
@@ -2230,6 +2246,14 @@ function formatIsoDateInput(value: string): string {
   const day = digits.slice(6, 8)
 
   return [year, month, day].filter(Boolean).join('-')
+}
+
+function getLocalDateInputValue(date = new Date()): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+
+  return `${year}-${month}-${day}`
 }
 
 function getChartPoints(
