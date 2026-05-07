@@ -32,15 +32,14 @@
   display: inline-grid;
   place-items: center;
   color: var(--accent);
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-border);
 }
 
 .brand-mark {
   width: 44px;
   height: 44px;
   flex: 0 0 auto;
-  border-radius: 14px;
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
 }
 
 .brand-name,
@@ -511,10 +510,8 @@ h3 {
   height: 42px;
   display: grid;
   place-items: center;
-  color: var(--accent);
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-border);
-  border-radius: 8px;
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
 }
 
 .install-card strong {
@@ -1181,6 +1178,9 @@ h3 {
   width: 68px;
   height: 68px;
   margin-bottom: 4px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
   border-radius: 22px;
 }
 
@@ -1235,8 +1235,26 @@ svg {
 }
 
 .brand-mark svg {
-  width: 24px;
-  height: 24px;
+  width: 100%;
+  height: 100%;
+}
+
+.install-card-icon svg {
+  width: 42px;
+  height: 42px;
+}
+
+.app-mark-bg {
+  fill: #c84234;
+  stroke: none;
+}
+
+.app-mark-symbol {
+  fill: none;
+  stroke: #fffaf6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.7;
 }
 
 .sheet-layer {

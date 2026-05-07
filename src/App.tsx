@@ -2374,10 +2374,9 @@ function SettingsIcon() {
 function YenIcon() {
   return (
     <svg viewBox="0 0 24 24" role="presentation" aria-hidden="true">
-      <path d="m6.5 4 5.5 8 5.5-8" />
-      <path d="M8 12h8" />
-      <path d="M8 16h8" />
-      <path d="M12 12v8" />
+      <rect className="app-mark-bg" x="1" y="1" width="22" height="22" rx="5" />
+      <path className="app-mark-symbol" d="m7.2 5.6 4.8 7.2 4.8-7.2" />
+      <path className="app-mark-symbol" d="M8 12.8h8M8 15.8h8M12 12.8v5.2" />
     </svg>
   )
 }
