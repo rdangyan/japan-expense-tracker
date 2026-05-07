@@ -112,6 +112,24 @@ export type EntryListView = {
   contextualTotalLabel: 'Spending total' | 'Withdrawal total'
 }
 
+export type TripCsvRow = {
+  entryId: string
+  tripId: string
+  tripName: string
+  entryType: TripEntryType
+  spendingTotalIncluded: 'yes' | 'no'
+  amountJpy: number
+  amountHome: string
+  homeCurrency: string
+  exchangeRateJpy: number
+  date: string
+  category: string
+  paymentMethod: string
+  note: string
+  createdAt: string
+  updatedAt: string
+}
+
 export type BudgetStatus = 'onTrack' | 'caution' | 'overBudget'
 
 export type CategoryBreakdown = {
@@ -541,6 +559,54 @@ export function getDashboardAnalytics(
   }
 }
 
+export function getTripCsvRows(trip: TripSettings, entries: TripEntry[]): TripCsvRow[] {
+  return [...entries]
+    .sort(compareEntriesByDateThenCreated)
+    .map((entry) => ({
+      entryId: entry.id,
+      tripId: entry.tripId,
+      tripName: trip.tripName,
+      entryType: entry.type,
+      spendingTotalIncluded: entry.type === 'expense' ? 'yes' : 'no',
+      amountJpy: entry.amountJpy,
+      amountHome: convertJpyToHome(entry.amountJpy, trip.exchangeRateJpy).toFixed(2),
+      homeCurrency: trip.homeCurrency,
+      exchangeRateJpy: trip.exchangeRateJpy,
+      date: entry.date,
+      category: entry.type === 'expense' ? entry.category : '',
+      paymentMethod:
+        entry.type === 'expense' && entry.paymentMethod ? paymentMethodLabels[entry.paymentMethod] : '',
+      note: entry.note ?? '',
+      createdAt: entry.createdAt,
+      updatedAt: entry.updatedAt,
+    }))
+}
+
+export function generateTripCsv(trip: TripSettings, entries: TripEntry[]): string {
+  const headers: (keyof TripCsvRow)[] = [
+    'entryId',
+    'tripId',
+    'tripName',
+    'entryType',
+    'spendingTotalIncluded',
+    'amountJpy',
+    'amountHome',
+    'homeCurrency',
+    'exchangeRateJpy',
+    'date',
+    'category',
+    'paymentMethod',
+    'note',
+    'createdAt',
+    'updatedAt',
+  ]
+  const rows = getTripCsvRows(trip, entries).map((row) =>
+    headers.map((header) => escapeCsvValue(row[header])).join(','),
+  )
+
+  return [headers.join(','), ...rows].join('\r\n')
+}
+
 export function convertHomeToJpy(amountHome: number, exchangeRateJpy: number): number {
   return Math.round(amountHome * exchangeRateJpy)
 }
@@ -770,6 +836,16 @@ function compareEntriesForSort(
 
 function compareEntriesByDateThenCreated(first: TripEntry, second: TripEntry): number {
   return first.date.localeCompare(second.date) || first.createdAt.localeCompare(second.createdAt)
+}
+
+function escapeCsvValue(value: string | number): string {
+  const text = String(value)
+
+  if (/[",\r\n]/.test(text)) {
+    return `"${text.replaceAll('"', '""')}"`
+  }
+
+  return text
 }
 
 function createStableId(prefix: string): string {

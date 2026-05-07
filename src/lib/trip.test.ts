@@ -8,8 +8,10 @@ import {
   createTripSettings,
   formatHomeCurrency,
   formatJpy,
+  generateTripCsv,
   getDashboardAnalytics,
   getEntryListView,
+  getTripCsvRows,
   isDateWithinTrip,
   isEntryWithinTrip,
   updateCashWithdrawalEntry,
@@ -20,6 +22,7 @@ import {
   validateTripSetup,
   type CashWithdrawalInput,
   type ExpenseInput,
+  type TripEntry,
   type TripSetupInput,
   type TripSettings,
 } from './trip'
@@ -620,6 +623,89 @@ describe('dashboard analytics', () => {
       { date: '2026-04-08', actualJpy: 30000, expectedJpy: 60000 },
       { date: '2026-04-09', actualJpy: 30000, expectedJpy: 80000 },
       { date: '2026-04-10', actualJpy: 30000, expectedJpy: 100000 },
+    ])
+  })
+})
+
+describe('trip CSV export', () => {
+  const trip: TripSettings = {
+    key: 'active-trip',
+    tripId: 'trip-csv',
+    tripName: 'Japan, Spring Trip',
+    startDate: '2026-04-06',
+    endDate: '2026-04-10',
+    homeCurrency: 'CAD',
+    totalBudgetHome: 1000,
+    exchangeRateJpy: 110,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-02T00:00:00.000Z',
+  }
+  const laterExpense: TripEntry = {
+    id: 'entry-later',
+    tripId: trip.tripId,
+    type: 'expense',
+    date: '2026-04-08',
+    amountJpy: 12345,
+    category: 'Food',
+    paymentMethod: 'cash',
+    note: 'Ramen, extra "egg"',
+    createdAt: '2026-04-08T02:00:00.000Z',
+    updatedAt: '2026-04-08T03:00:00.000Z',
+  }
+  const firstCreatedExpense: TripEntry = {
+    id: 'entry-first-created',
+    tripId: trip.tripId,
+    type: 'expense',
+    date: '2026-04-06',
+    amountJpy: 500,
+    category: 'Transit',
+    note: 'Metro',
+    createdAt: '2026-04-06T01:00:00.000Z',
+    updatedAt: '2026-04-06T01:00:00.000Z',
+  }
+  const secondCreatedWithdrawal: TripEntry = {
+    id: 'entry-second-created',
+    tripId: trip.tripId,
+    type: 'cashWithdrawal',
+    date: '2026-04-06',
+    amountJpy: 10000,
+    note: 'ATM',
+    createdAt: '2026-04-06T02:00:00.000Z',
+    updatedAt: '2026-04-06T02:30:00.000Z',
+  }
+
+  it('creates rows for all entry types with current exchange-rate derived amounts', () => {
+    const rows = getTripCsvRows(trip, [laterExpense, secondCreatedWithdrawal, firstCreatedExpense])
+
+    expect(rows.map((row) => row.entryId)).toEqual([
+      'entry-first-created',
+      'entry-second-created',
+      'entry-later',
+    ])
+    expect(rows[0]).toMatchObject({
+      entryType: 'expense',
+      spendingTotalIncluded: 'yes',
+      amountHome: '4.55',
+      category: 'Transit',
+      paymentMethod: '',
+    })
+    expect(rows[1]).toMatchObject({
+      entryType: 'cashWithdrawal',
+      spendingTotalIncluded: 'no',
+      amountHome: '90.91',
+      category: '',
+      paymentMethod: '',
+    })
+  })
+
+  it('generates valid escaped CSV in stable row order', () => {
+    const csv = generateTripCsv(trip, [laterExpense, secondCreatedWithdrawal, firstCreatedExpense])
+
+    expect(csv.split('\r\n')).toEqual([
+      'entryId,tripId,tripName,entryType,spendingTotalIncluded,amountJpy,amountHome,homeCurrency,exchangeRateJpy,date,category,paymentMethod,note,createdAt,updatedAt',
+      'entry-first-created,trip-csv,"Japan, Spring Trip",expense,yes,500,4.55,CAD,110,2026-04-06,Transit,,Metro,2026-04-06T01:00:00.000Z,2026-04-06T01:00:00.000Z',
+      'entry-second-created,trip-csv,"Japan, Spring Trip",cashWithdrawal,no,10000,90.91,CAD,110,2026-04-06,,,ATM,2026-04-06T02:00:00.000Z,2026-04-06T02:30:00.000Z',
+      'entry-later,trip-csv,"Japan, Spring Trip",expense,yes,12345,112.23,CAD,110,2026-04-08,Food,Cash,"Ramen, extra ""egg""",2026-04-08T02:00:00.000Z,2026-04-08T03:00:00.000Z',
     ])
   })
 })

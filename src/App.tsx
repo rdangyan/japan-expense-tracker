@@ -12,6 +12,7 @@ import {
   expenseCategories,
   formatHomeCurrency,
   formatJpy,
+  generateTripCsv,
   getDashboardAnalytics,
   getEntryListView,
   isDateWithinTrip,
@@ -1329,6 +1330,8 @@ function EntryManagementList({ entries, trip, onEdit, onDelete, onAdd }: EntryMa
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [sortOrder, setSortOrder] = useState<EntrySortOrder>('newest')
+  const [exportMessage, setExportMessage] = useState<string | null>(null)
+  const [exportError, setExportError] = useState<string | null>(null)
   const entryListView = useMemo(
     () =>
       getEntryListView(entries, {
@@ -1359,9 +1362,36 @@ function EntryManagementList({ entries, trip, onEdit, onDelete, onAdd }: EntryMa
     setEndDate('')
   }
 
+  function handleExportCsv() {
+    setExportMessage(null)
+    setExportError(null)
+
+    try {
+      downloadTripCsv(trip, entries)
+      setExportMessage(`Exported ${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}.`)
+    } catch {
+      setExportError('CSV export could not be created in this browser.')
+    }
+  }
+
   return (
     <div className="entry-management">
       <div className="entry-controls" aria-label="Search and filter entries">
+        <div className="entry-export-row">
+          <div>
+            <p className="section-kicker">Complete history</p>
+            <p>Export all entries, including rows hidden by current filters.</p>
+          </div>
+          <button className="secondary-action" type="button" onClick={handleExportCsv}>
+            Export CSV
+          </button>
+        </div>
+        {(exportMessage || exportError) && (
+          <p className={exportError ? 'form-error' : 'form-success'} role={exportError ? 'alert' : 'status'}>
+            {exportError ?? exportMessage}
+          </p>
+        )}
+
         <label className="field entry-search-field" htmlFor="entrySearch">
           <span>Search entries</span>
           <input
@@ -2078,6 +2108,30 @@ function formatDate(value: string): string {
     year: 'numeric',
     timeZone: 'UTC',
   }).format(new Date(`${value}T00:00:00.000Z`))
+}
+
+function downloadTripCsv(trip: TripSettings, entries: TripEntry[]) {
+  const csv = generateTripCsv(trip, entries)
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+
+  link.href = url
+  link.download = createCsvFileName(trip)
+  document.body.append(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+function createCsvFileName(trip: TripSettings): string {
+  const safeTripName = trip.tripName
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+
+  return `${safeTripName || 'japan-trip'}-entries.csv`
 }
 
 function TabIcon({ icon }: { icon: Tab['icon'] }) {
