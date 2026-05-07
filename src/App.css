@@ -448,8 +448,9 @@ h3 {
 }
 
 .expenses-tab-panel {
-  min-height: 38rem;
-  max-height: calc(100svh - 5rem);
+  min-height: 0;
+  max-height: none;
+  overflow: visible;
 }
 
 .tab-heading {
@@ -477,6 +478,64 @@ h3 {
   padding: 0 16px;
   color: var(--accent-contrast);
   background: var(--accent);
+}
+
+.install-card {
+  position: fixed;
+  inset-inline: 12px;
+  bottom: calc(84px + env(safe-area-inset-bottom));
+  z-index: 20;
+  width: min(calc(100% - 24px), 38rem);
+  margin-inline: auto;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(18px);
+}
+
+.install-card-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: 8px;
+}
+
+.install-card strong {
+  color: var(--text-strong);
+  font-size: 0.95rem;
+}
+
+.install-card p {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.install-card-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.install-card-actions .primary-action {
+  min-height: 40px;
+}
+
+.install-card-actions .icon-button {
+  width: 40px;
+  min-height: 40px;
 }
 
 .secondary-action {
@@ -833,10 +892,10 @@ h3 {
   min-height: 0;
   padding: 18px;
   display: grid;
-  grid-template-rows: auto auto minmax(18rem, 1fr);
+  grid-template-rows: auto auto auto;
   gap: 14px;
   flex: 1;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .entry-controls {
@@ -879,6 +938,10 @@ h3 {
   gap: 10px;
 }
 
+.entry-filter-grid .field {
+  min-width: 0;
+}
+
 .entry-filter-grid .field span:first-child,
 .entry-search-field span:first-child {
   font-size: 0.78rem;
@@ -887,6 +950,7 @@ h3 {
 .entry-filter-grid input,
 .entry-filter-grid select,
 .entry-search-field input {
+  min-width: 0;
   min-height: 42px;
   font-size: 0.92rem;
 }
@@ -904,15 +968,15 @@ h3 {
 }
 
 .managed-entry-list {
-  min-height: 18rem;
-  max-height: min(42rem, 54svh);
+  min-height: 0;
+  max-height: none;
   margin: 0;
   padding: 0;
   display: grid;
   align-content: start;
   gap: 10px;
   list-style: none;
-  overflow: auto;
+  overflow: visible;
   overscroll-behavior: contain;
   padding-right: 2px;
 }
@@ -1352,11 +1416,18 @@ a:focus-visible {
   .expenses-tab-panel {
     min-height: 44rem;
     max-height: calc(100svh - 4rem);
+    overflow: hidden;
+  }
+
+  .entry-management {
+    grid-template-rows: auto auto minmax(24rem, 1fr);
+    overflow: hidden;
   }
 
   .managed-entry-list {
     min-height: 24rem;
     max-height: min(48rem, 58svh);
+    overflow: auto;
   }
 
   .overview-panel {
@@ -1374,6 +1445,11 @@ a:focus-visible {
 
   .empty-state {
     padding: 42px 30px;
+  }
+
+  .install-card {
+    inset-inline: auto 24px;
+    bottom: 24px;
   }
 }
 

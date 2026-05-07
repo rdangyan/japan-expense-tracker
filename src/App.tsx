@@ -59,6 +59,11 @@ type Tab = {
   icon: 'dashboard' | 'expenses' | 'settings'
 }
 
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>
+}
+
 const tabs: Tab[] = [
   { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
   { id: 'expenses', label: 'Expenses', icon: 'expenses' },
@@ -100,6 +105,7 @@ function App() {
   const [isResettingTrip, setIsResettingTrip] = useState(false)
   const [isLoadingTrip, setIsLoadingTrip] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const installPrompt = useInstallPrompt()
   const currentTab = tabs.find((tab) => tab.id === activeTab) ?? tabs[0]
   const emptyState = emptyStates[activeTab]
   const hasEntries = entries.length > 0
@@ -159,6 +165,7 @@ function App() {
   if (!trip) {
     return (
       <TripSetupScreen
+        installPrompt={installPrompt}
         loadError={loadError}
         onTripCreated={(nextTrip, nextEntries = []) => {
           setTrip(nextTrip)
@@ -257,6 +264,8 @@ function App() {
             </div>
           </dl>
         </section>
+
+        <InstallCard installPrompt={installPrompt} />
 
         <section
           className={`tab-panel ${activeTab === 'expenses' ? 'expenses-tab-panel' : ''}`}
@@ -429,6 +438,7 @@ function App() {
 }
 
 type TripSetupScreenProps = {
+  installPrompt: InstallPromptState
   loadError: string | null
   onTripCreated: (trip: TripSettings, entries?: TripEntry[]) => void
 }
@@ -442,7 +452,7 @@ const initialTripSetup: TripSetupInput = {
   exchangeRateJpy: '',
 }
 
-function TripSetupScreen({ loadError, onTripCreated }: TripSetupScreenProps) {
+function TripSetupScreen({ installPrompt, loadError, onTripCreated }: TripSetupScreenProps) {
   const [form, setForm] = useState<TripSetupInput>(initialTripSetup)
   const [touched, setTouched] = useState<Partial<Record<keyof TripSetupInput, boolean>>>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -680,8 +690,85 @@ function TripSetupScreen({ loadError, onTripCreated }: TripSetupScreenProps) {
             </button>
           </div>
         </form>
+        <InstallCard installPrompt={installPrompt} />
       </section>
     </main>
+  )
+}
+
+type InstallPromptState = {
+  canInstall: boolean
+  install: () => void
+  dismiss: () => void
+}
+
+function useInstallPrompt(): InstallPromptState {
+  const [promptEvent, setPromptEvent] = useState<BeforeInstallPromptEvent | null>(null)
+  const [isDismissed, setIsDismissed] = useState(false)
+
+  useEffect(() => {
+    function handleBeforeInstallPrompt(event: Event) {
+      event.preventDefault()
+      setIsDismissed(false)
+      setPromptEvent(event as BeforeInstallPromptEvent)
+    }
+
+    function handleAppInstalled() {
+      setPromptEvent(null)
+      setIsDismissed(true)
+    }
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+    window.addEventListener('appinstalled', handleAppInstalled)
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+      window.removeEventListener('appinstalled', handleAppInstalled)
+    }
+  }, [])
+
+  return {
+    canInstall: Boolean(promptEvent) && !isDismissed,
+    dismiss: () => setIsDismissed(true),
+    install: () => {
+      if (!promptEvent) {
+        return
+      }
+
+      promptEvent.prompt()
+      promptEvent.userChoice.finally(() => setPromptEvent(null))
+    },
+  }
+}
+
+function InstallCard({ installPrompt }: { installPrompt: InstallPromptState }) {
+  if (!installPrompt.canInstall) {
+    return null
+  }
+
+  return (
+    <aside className="install-card" aria-label="Install app">
+      <div className="install-card-icon" aria-hidden="true">
+        <YenIcon />
+      </div>
+      <div>
+        <strong>Install for offline trips</strong>
+        <p>Keep the app shell available after first visit. Trip data stays local to this browser.</p>
+      </div>
+      <div className="install-card-actions">
+        <button className="primary-action" type="button" onClick={installPrompt.install}>
+          Install
+        </button>
+        <button
+          className="icon-button"
+          type="button"
+          aria-label="Dismiss install prompt"
+          onClick={installPrompt.dismiss}
+        >
+          <CloseIcon />
+        </button>
+      </div>
+    </aside>
   )
 }
 
@@ -1460,7 +1547,10 @@ function EntryManagementList({ entries, trip, onEdit, onDelete, onAdd }: EntryMa
             <input
               id="entryStartDate"
               name="entryStartDate"
-              type="date"
+              type="text"
+              inputMode="numeric"
+              pattern="\d{4}-\d{2}-\d{2}"
+              placeholder="YYYY-MM-DD"
               value={startDate}
               onChange={(event) => setStartDate(event.target.value)}
             />
@@ -1471,7 +1561,10 @@ function EntryManagementList({ entries, trip, onEdit, onDelete, onAdd }: EntryMa
             <input
               id="entryEndDate"
               name="entryEndDate"
-              type="date"
+              type="text"
+              inputMode="numeric"
+              pattern="\d{4}-\d{2}-\d{2}"
+              placeholder="YYYY-MM-DD"
               value={endDate}
               onChange={(event) => setEndDate(event.target.value)}
             />
